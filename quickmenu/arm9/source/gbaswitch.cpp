@@ -1,8 +1,8 @@
-#include "common/dsimenusettings.h"
+#include "common/nds_loader_arm9.h"
+#include "common/twlmenusettings.h"
 #include "common/tonccpy.h"
-#include "graphics/lodepng.h"
+#include "common/lodepng.h"
 #include "gbaswitch.h"
-#include "nds_loader_arm9.h"
 
 extern u16 bmpImageBuffer[256*192];
 
@@ -14,7 +14,7 @@ void loadGbaBorder(const char* filename) {
 	lodepng::decode(image, imageWidth, imageHeight, filename);
 	bool alternatePixel = false;
 
-	for(uint i = 0; i < image.size()/4; i++) {
+	for (uint i = 0; i < image.size()/4; i++) {
 		image[(i*4)+3] = 0;
 		if (alternatePixel) {
 			if (image[(i*4)] >= 0x4) {
@@ -34,11 +34,11 @@ void loadGbaBorder(const char* filename) {
 		if ((i % 256) == 255) alternatePixel = !alternatePixel;
 		alternatePixel = !alternatePixel;
 	}
-    DC_FlushRange(bmpImageBuffer,SCREEN_WIDTH*SCREEN_HEIGHT*2);
-    dmaCopy(bmpImageBuffer,(void*)BG_BMP_RAM(0),SCREEN_WIDTH*SCREEN_HEIGHT*2);
+	DC_FlushRange(bmpImageBuffer,SCREEN_WIDTH*SCREEN_HEIGHT*2);
+	dmaCopy(bmpImageBuffer,(void*)BG_BMP_RAM(0),SCREEN_WIDTH*SCREEN_HEIGHT*2);
 
 	alternatePixel = false;
-	for(uint i = 0; i < image.size()/4; i++) {
+	for (uint i = 0; i < image.size()/4; i++) {
 		if (alternatePixel) {
 			if (image[(i*4)+3] & BIT(0)) {
 				image[(i*4)] += 0x4;
@@ -64,8 +64,8 @@ void loadGbaBorder(const char* filename) {
 		if ((i % 256) == 255) alternatePixel = !alternatePixel;
 		alternatePixel = !alternatePixel;
 	}
-    DC_FlushRange(bmpImageBuffer,SCREEN_WIDTH*SCREEN_HEIGHT*2);
-    dmaCopy(bmpImageBuffer,(void*)BG_BMP_RAM(8),SCREEN_WIDTH*SCREEN_HEIGHT*2);
+	DC_FlushRange(bmpImageBuffer,SCREEN_WIDTH*SCREEN_HEIGHT*2);
+	dmaCopy(bmpImageBuffer,(void*)BG_BMP_RAM(8),SCREEN_WIDTH*SCREEN_HEIGHT*2);
 }
 
 void gbaSwitch(void) {
@@ -96,5 +96,5 @@ void gbaSwitch(void) {
 	loadGbaBorder((access(borderPath, F_OK)==0) ? borderPath : "nitro:/graphics/gbaborder.png");
 
 	// Switch to GBA mode
-	runNdsFile ("/_nds/TWiLightMenu/gbaswitch.srldr", 0, NULL, true, false, true, false, false, -1);	
+	runNdsFile ("/_nds/TWiLightMenu/gbaswitch.srldr", 0, NULL, false, true, false, true, false, false, false, -1);	
 }

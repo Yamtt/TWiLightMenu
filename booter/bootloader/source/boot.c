@@ -36,6 +36,7 @@ Helpful information:
 #include <nds/ndstypes.h>
 #include <nds/dma.h>
 #include <nds/system.h>
+#include <nds/ipc.h>
 #include <nds/interrupts.h>
 #include <nds/timers.h>
 #define ARM9
@@ -46,13 +47,12 @@ Helpful information:
 #undef ARM9
 #define ARM7
 #include <nds/arm7/audio.h>
+#include "dmaTwl.h"
 #include "sdmmc.h"
 #include "fat.h"
 #include "dldi_patcher.h"
 #include "card.h"
 #include "boot.h"
-
-void arm7clearRAM();
 
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 // Important things
@@ -79,28 +79,28 @@ extern unsigned long dsiMode;
 #define FW_READ        0x03
 
 void boot_readFirmware (uint32 address, uint8 * buffer, uint32 size) {
-  uint32 index;
+	uint32 index;
 
-  // Read command
-  while (REG_SPICNT & SPI_BUSY);
-  REG_SPICNT = SPI_ENABLE | SPI_CONTINUOUS | SPI_DEVICE_NVRAM;
-  REG_SPIDATA = FW_READ;
-  while (REG_SPICNT & SPI_BUSY);
+	// Read command
+	while (REG_SPICNT & SPI_BUSY);
+	REG_SPICNT = SPI_ENABLE | SPI_CONTINUOUS | SPI_DEVICE_NVRAM;
+	REG_SPIDATA = FW_READ;
+	while (REG_SPICNT & SPI_BUSY);
 
-  // Set the address
-  REG_SPIDATA =  (address>>16) & 0xFF;
-  while (REG_SPICNT & SPI_BUSY);
-  REG_SPIDATA =  (address>>8) & 0xFF;
-  while (REG_SPICNT & SPI_BUSY);
-  REG_SPIDATA =  (address) & 0xFF;
-  while (REG_SPICNT & SPI_BUSY);
+	// Set the address
+	REG_SPIDATA = (address>>16) & 0xFF;
+	while (REG_SPICNT & SPI_BUSY);
+	REG_SPIDATA = (address>>8) & 0xFF;
+	while (REG_SPICNT & SPI_BUSY);
+	REG_SPIDATA = (address) & 0xFF;
+	while (REG_SPICNT & SPI_BUSY);
 
-  for (index = 0; index < size; index++) {
-    REG_SPIDATA = 0;
-    while (REG_SPICNT & SPI_BUSY);
-    buffer[index] = REG_SPIDATA & 0xFF;
-  }
-  REG_SPICNT = 0;
+	for (index = 0; index < size; index++) {
+		REG_SPIDATA = 0;
+		while (REG_SPICNT & SPI_BUSY);
+		buffer[index] = REG_SPIDATA & 0xFF;
+	}
+	REG_SPICNT = 0;
 }
 
 
@@ -126,7 +126,7 @@ void passArgs_ARM7 (void) {
 
 	if (!argStart || !argSize) return;
 
-	if ( ARM9_DST == 0 && ARM9_LEN == 0) {
+	if (ARM9_DST == 0 && ARM9_LEN == 0) {
 		ARM9_DST = *((u32*)(NDS_HEAD + 0x038));
 		ARM9_LEN = *((u32*)(NDS_HEAD + 0x03C));
 	}
@@ -138,12 +138,10 @@ void passArgs_ARM7 (void) {
 	if (ARM9_LEN > 0x380000) {
 		argDst = (u32*)0x02FFA000;
 	} else
-	if (dsiMode && (*(u8*)(NDS_HEAD + 0x012) & BIT(1)))
-	{
+	if (dsiMode && (*(u8*)(NDS_HEAD + 0x012) & BIT(1))) {
 		u32 ARM9i_DST = *((u32*)(TWL_HEAD + 0x1C8));
 		u32 ARM9i_LEN = *((u32*)(TWL_HEAD + 0x1CC));
-		if (ARM9i_LEN)
-		{
+		if (ARM9i_LEN) {
 			u32* argDst2 = (u32*)((ARM9i_DST + ARM9i_LEN + 3) & ~3);		// Word aligned
 			if (argDst2 > argDst)
 				argDst = argDst2;
@@ -160,6 +158,25 @@ void passArgs_ARM7 (void) {
 
 
 
+static void initMBK_dsiMode(void) {
+	// This function has no effect with ARM7 SCFG locked
+	*(vu32*)REG_MBK1 = *(u32*)0x02FFE180;
+	*(vu32*)REG_MBK2 = *(u32*)0x02FFE184;
+	*(vu32*)REG_MBK3 = *(u32*)0x02FFE188;
+	*(vu32*)REG_MBK4 = *(u32*)0x02FFE18C;
+	*(vu32*)REG_MBK5 = *(u32*)0x02FFE190;
+	REG_MBK6 = *(u32*)0x02FFE1A0;
+	REG_MBK7 = *(u32*)0x02FFE1A4;
+	REG_MBK8 = *(u32*)0x02FFE1A8;
+	REG_MBK9 = *(u32*)0x02FFE1AC;
+}
+
+void memset_addrs_arm7(u32 start, u32 end)
+{
+	// toncset((u32*)start, 0, ((int)end - (int)start));
+	dma_twlFill32(0, 0, (u32*)start, ((int)end - (int)start));
+}
+
 /*-------------------------------------------------------------------------
 resetMemory_ARM7
 Clears all of the NDS's RAM that is visible to the ARM7
@@ -169,7 +186,7 @@ Modified by Chishm:
 --------------------------------------------------------------------------*/
 void resetMemory_ARM7 (void)
 {
-	int i;
+	int i, reg;
 	u8 settings1, settings2;
 	u32 settingsOffset = 0;
 
@@ -183,6 +200,13 @@ void resetMemory_ARM7 (void)
 	}
 
 	REG_SOUNDCNT = 0;
+	REG_SNDCAP0CNT = 0;
+	REG_SNDCAP1CNT = 0;
+
+	REG_SNDCAP0DAD = 0;
+	REG_SNDCAP0LEN = 0;
+	REG_SNDCAP1DAD = 0;
+	REG_SNDCAP1LEN = 0;
 
 	//clear out ARM7 DMA channels and timers
 	for (i=0; i<4; i++) {
@@ -191,14 +215,23 @@ void resetMemory_ARM7 (void)
 		DMA_DEST(i) = 0;
 		TIMER_CR(i) = 0;
 		TIMER_DATA(i) = 0;
+		for (reg=0; reg<0x1c; reg+=4)*((vu32*)(0x04004104 + ((i*0x1c)+reg))) = 0;//Reset NDMA.
 	}
 
-	arm7clearRAM();
+	// Clear out FIFO
+	REG_IPC_SYNC = 0;
+	REG_IPC_FIFO_CR = IPC_FIFO_ENABLE | IPC_FIFO_SEND_CLEAR;
+	REG_IPC_FIFO_CR = 0;
+
+	memset_addrs_arm7(0x03800000 - 0x8000, 0x03800000 + 0xC000); // clear exclusive IWRAM
+	memset_addrs_arm7(0x02004000, 0x03000000 - 0xC000);	// clear part of EWRAM - except before bootstub
 
 	REG_IE = 0;
 	REG_IF = ~0;
-	(*(vu32*)(0x04000000-4)) = 0;  //IRQ_HANDLER ARM7 version
-	(*(vu32*)(0x04000000-8)) = ~0; //VBLANK_INTR_WAIT_FLAGS, ARM7 version
+	REG_AUXIE = 0;
+	REG_AUXIF = ~0;
+	*(vu32*)0x0380FFFC = 0;  // IRQ_HANDLER ARM7 version
+	*(vu32*)0x0380FFF8 = 0; // VBLANK_INTR_WAIT_FLAGS, ARM7 version
 	REG_POWERCNT = 1;  //turn off power to stuff
 
 	// Get settings location
@@ -217,7 +250,7 @@ void resetMemory_ARM7 (void)
 
 	((vu32*)0x040044f0)[2] = 0x202DDD1D;
 	((vu32*)0x040044f0)[3] = 0xE1A00005;
-	while((*(vu32*)0x04004400) & 0x2000000);
+	while ((*(vu32*)0x04004400) & 0x2000000);
 
 }
 
@@ -247,8 +280,7 @@ void loadBinary_ARM7 (u32 fileCluster)
 	ndsHeader[0x024>>2] = 0;
 	dmaCopyWords(3, (void*)ndsHeader, (void*)NDS_HEAD, 0x170);
 
-	if (dsiMode && (ndsHeader[0x10>>2]&BIT(16+1)))
-	{
+	if (dsiMode && (ndsHeader[0x10>>2]&BIT(16+1))) {
 		// Read full TWL header
 		fileRead((char*)TWL_HEAD, fileCluster, 0, 0x1000);
 
@@ -263,6 +295,8 @@ void loadBinary_ARM7 (u32 fileCluster)
 			fileRead(ARM9i_DST, fileCluster, ARM9i_SRC, ARM9i_LEN);
 		if (ARM7i_LEN)
 			fileRead(ARM7i_DST, fileCluster, ARM7i_SRC, ARM7i_LEN);
+
+		initMBK_dsiMode();
 	}
 }
 
@@ -275,8 +309,8 @@ Modified by Chishm:
 --------------------------------------------------------------------------*/
 void startBinary_ARM7 (void) {
 	REG_IME=0;
-	while(REG_VCOUNT!=191);
-	while(REG_VCOUNT==191);
+	while (REG_VCOUNT!=191);
+	while (REG_VCOUNT==191);
 	// copy NDS ARM9 start address into the header, starting ARM9
 	*((vu32*)0x02FFFE24) = TEMP_ARM9_START_ADDRESS;
 	ARM9_START_FLAG = 1;
@@ -318,16 +352,14 @@ int main (void) {
 #endif
 	u32 fileCluster = storedFileCluster;
 	// Init card
-	if(!FAT_InitFiles(initDisc))
-	{
+	if (!FAT_InitFiles(initDisc)) {
 		return -1;
 	}
 	if ((fileCluster < CLUSTER_FIRST) || (fileCluster >= CLUSTER_EOF)) 	/* Invalid file cluster specified */
 	{
 		fileCluster = getBootFileCluster(bootName);
 	}
-	if (fileCluster == CLUSTER_FREE)
-	{
+	if (fileCluster == CLUSTER_FREE) {
 		return -1;
 	}
 

@@ -6,8 +6,9 @@
 #include <unistd.h>
 #include <string>
 
-#include "common/dsimenusettings.h"
+#include "common/twlmenusettings.h"
 #include "common/inifile.h"
+#include "common/logging.h"
 
 #define STRING(what,def) std::string STR_##what;
 #include "language.inl"
@@ -20,8 +21,8 @@ std::string getString(CIniFile &ini, const std::string &item, const std::string 
 	std::string out = ini.GetString("LANGUAGE", item, defaultValue);
 
 	// Convert "\n" to actual newlines
-	for(uint i = 0; i < out.length() - 1; i++) {
-		if(out[i] == '\\') {
+	for (uint i = 0; i < out.length() - 1; i++) {
+		if (out[i] == '\\') {
 			switch(out[i + 1]) {
 				case 'n':
 				case 'N':
@@ -85,10 +86,10 @@ std::string getString(CIniFile &ini, const std::string &item, const std::string 
 				default:
 					break;
 			}
-		} else if(out[i] == '&') {
-			if(out.substr(i + 1, 3) == "lrm") {
+		} else if (out[i] == '&') {
+			if (out.substr(i + 1, 3) == "lrm") {
 				out = out.substr(0, i) + "\u200E" + out.substr(i + 4); // Left-to-Right mark
-			} else if(out.substr(i + 1, 3) == "rlm") {
+			} else if (out.substr(i + 1, 3) == "rlm") {
 				out = out.substr(0, i) + "\u200F" + out.substr(i + 4); // Right-to-Left mark
 			}
 		}
@@ -103,6 +104,8 @@ std::string getString(CIniFile &ini, const std::string &item, const std::string 
  */
 void langInit(void)
 {
+	logPrint("langInit() ");
+
 	char languageIniPath[64];
 	snprintf(languageIniPath, sizeof(languageIniPath), "nitro:/languages/%s/language.ini", ms().getGuiLanguageString().c_str());
 
@@ -111,4 +114,6 @@ void langInit(void)
 #define STRING(what,def) STR_##what = getString(languageini, ""#what, def);
 #include "language.inl"
 #undef STRING
+
+	logPrint("Language inited\n");
 }

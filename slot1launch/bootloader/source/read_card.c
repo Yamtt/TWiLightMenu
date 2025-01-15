@@ -24,7 +24,7 @@
 #include <nds/card.h>
 #include <string.h>
 
-#include "tonccpy.h"
+#include "common/tonccpy.h"
 #include "encryption.h"
 #include "common.h"
 
@@ -78,7 +78,7 @@ static void initKey1Encryption (u8* cmdData, int iCardDevice) {
 	key1data.mmm = getRandomNumber() & 0x00000fff;
 	key1data.nnn = getRandomNumber() & 0x00000fff;
 
-    if(iCardDevice) //DSi
+    if (iCardDevice) //DSi
       cmdData[7]=0x3D;	// CARD_CMD_ACTIVATE_BF2
     else
       cmdData[7]=CARD_CMD_ACTIVATE_BF;
@@ -151,14 +151,14 @@ static void switchToTwlBlowfish(sNDSHeaderExt* ndsHeader) {
 
 	// Reset card slot
 	disableSlot1();
-	for(int i = 0; i < 25; i++) {
-		while(REG_VCOUNT!=191);
-		while(REG_VCOUNT==191);
+	for (int i = 0; i < 25; i++) {
+		while (REG_VCOUNT!=191);
+		while (REG_VCOUNT==191);
 	}
 	enableSlot1();
-	for(int i = 0; i < 15; i++) {
-		while(REG_VCOUNT!=191);
-		while(REG_VCOUNT==191);
+	for (int i = 0; i < 15; i++) {
+		while (REG_VCOUNT!=191);
+		while (REG_VCOUNT==191);
 	}
 
 	// Dummy command sent after card reset
@@ -268,7 +268,7 @@ int cardInit (sNDSHeaderExt* ndsHeader, u32* chipID)
 		NULL, 0);
 
 	*chipID=cardReadID(CARD_CLK_SLOW);	
-	while(REG_ROMCTRL & CARD_BUSY);
+	while (REG_ROMCTRL & CARD_BUSY);
 	//u32 iCheapCard=iCardId&0x80000000;
 
 	// Read the header
@@ -278,15 +278,13 @@ int cardInit (sNDSHeaderExt* ndsHeader, u32* chipID)
 
 	tonccpy(ndsHeader, headerData, 0x200);
 
-	if ((ndsHeader->unitCode != 0) || (ndsHeader->dsi_flags != 0))
-	{
+	if ((ndsHeader->unitCode != 0) || (ndsHeader->dsi_flags != 0)) {
 		// Extended header found
 		cardParamCommand (CARD_CMD_HEADER_READ, 0,
 			CARD_ACTIVATE | CARD_nRESET | CARD_CLK_SLOW | CARD_BLK_SIZE(4) | CARD_DELAY1(0x1FFF) | CARD_DELAY2(0x3F),
 			(void*)headerData, 0x1000/sizeof(u32));
 		if (ndsHeader->dsi1[0]==0xFFFFFFFF && ndsHeader->dsi1[1]==0xFFFFFFFF
-		 && ndsHeader->dsi1[2]==0xFFFFFFFF && ndsHeader->dsi1[3]==0xFFFFFFFF)
-		{
+		 && ndsHeader->dsi1[2]==0xFFFFFFFF && ndsHeader->dsi1[3]==0xFFFFFFFF) {
 			toncset((u8*)headerData+0x200, 0, 0xE00);	// Clear out FFs
 		}
 		tonccpy(ndsHeader, headerData, 0x1000);
@@ -384,7 +382,7 @@ int cardInit (sNDSHeaderExt* ndsHeader, u32* chipID)
 	cardPolledTransfer(portFlagsKey1, NULL, 0, cmdData);
 
     //CycloDS doesn't like the dsi secure area being decrypted
-    if((ndsHeader->arm9romOffset != 0x4000) || secureArea[0] || secureArea[1])
+    if ((ndsHeader->arm9romOffset != 0x4000) || secureArea[0] || secureArea[1])
     {
 		decryptSecureArea (gameCode->key, secureArea, 0);
 	}

@@ -90,6 +90,10 @@ void SetBrightness(u8 screen, s8 bright) {
 /*-------------------------------------------------------------------------
 arm9_errorOutput
 Displays an error code on screen.
+
+Each box is 2 bits, and left-to-right is most-significant bits to least.
+Red = 00, Yellow = 01, Green = 10, Blue = 11
+
 Written by Chishm
 --------------------------------------------------------------------------*/
 /*static void arm9_errorOutput (u32 code, bool clearBG) {
@@ -265,19 +269,19 @@ void arm9_main (void) {
 
 	// set ARM9 state to ready and wait for it to change again
 	arm9_stateFlag = ARM9_READY;
-	while ( arm9_stateFlag != ARM9_BOOTBIN ) {
+	while (arm9_stateFlag != ARM9_BOOTBIN) {
 		if (arm9_stateFlag == ARM9_DISPERR) {
 			// Re-enable for debugging
 			//arm9_errorOutput (arm9_errorCode, arm9_errorClearBG);
-			if ( arm9_stateFlag == ARM9_DISPERR) {
+			if (arm9_stateFlag == ARM9_DISPERR) {
 				arm9_stateFlag = ARM9_READY;
 			}
 		}
 	}
 	
 	// wait for vblank then boot
-	while(REG_VCOUNT!=191);
-	while(REG_VCOUNT==191);
+	while (REG_VCOUNT!=191);
+	while (REG_VCOUNT==191);
 	
 	// arm9_errorOutput (*(u32*)(first), true);
 

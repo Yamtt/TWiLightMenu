@@ -10,11 +10,6 @@
 
 vu32* sharedAddr = (vu32*)0x02FFFA00;
 
-void sdio_done()
-{
-	sharedAddr[3] = sharedAddr[4];
-}
-
 //---------------------------------------------------------------------------------
 bool my_sdio_Startup() {
 //---------------------------------------------------------------------------------
@@ -23,28 +18,25 @@ bool my_sdio_Startup() {
 		sharedAddr = (vu32*)0x0CFFFA00;
 	}
 
-	irqSet(IRQ_IPC_SYNC, sdio_done);
-	irqEnable(IRQ_IPC_SYNC);
-
 	int result = 0;
 
 	if (sharedAddr[1] == 0x49444C44) {
-		*(u32*)(0x2FFFA00) = (u32)io_dldi_data;
+		sharedAddr[0] = (u32)io_dldi_data;
 		sysSetCardOwner(BUS_OWNER_ARM7);
 	} else {
 		sharedAddr[3] = 0x56484453;
-		IPC_SendSync(8);
-		while(sharedAddr[3] == 0x56484453) {
+		IPC_SendSync(0);
+		while (sharedAddr[3] == 0x56484453) {
 			swiDelay(100);
 		}
 		result = sharedAddr[3];
 
-		if(result==0) return false;
+		if (result==0) return false;
 	}
 
 	sharedAddr[3] = 0x54534453;
-	IPC_SendSync(8);
-	while(sharedAddr[3] == 0x54534453) {
+	IPC_SendSync(1);
+	while (sharedAddr[3] == 0x54534453) {
 		swiDelay(100);
 	}
 
@@ -57,8 +49,8 @@ bool my_sdio_Startup() {
 bool my_sdio_IsInserted() {
 //---------------------------------------------------------------------------------
 	sharedAddr[3] = 0x4E494453;
-	IPC_SendSync(8);
-	while(sharedAddr[3] == 0x4E494453) {
+	IPC_SendSync(3);
+	while (sharedAddr[3] == 0x4E494453) {
 		swiDelay(100);
 	}
 	int result = sharedAddr[3];
@@ -76,8 +68,8 @@ bool my_sdio_ReadSectors(sec_t sector, sec_t numSectors,void* buffer) {
 	sharedAddr[2] = (vu32)buffer;
 	
 	sharedAddr[3] = 0x44524453;
-	IPC_SendSync(8);
-	while(sharedAddr[3] == 0x44524453) {
+	IPC_SendSync(4);
+	while (sharedAddr[3] == 0x44524453) {
 		swiDelay(100);
 	}
 
@@ -96,8 +88,8 @@ bool my_sdio_WriteSectors(sec_t sector, sec_t numSectors,const void* buffer) {
 	sharedAddr[2] = (vu32)buffer;
 	
 	sharedAddr[3] = 0x52574453;
-	IPC_SendSync(8);
-	while(sharedAddr[3] == 0x52574453) {
+	IPC_SendSync(5);
+	while (sharedAddr[3] == 0x52574453) {
 		swiDelay(100);
 	}
 

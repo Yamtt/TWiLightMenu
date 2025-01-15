@@ -1,6 +1,6 @@
 #include <nds.h>
 #include <sys/stat.h>
-#include "common/dsimenusettings.h"
+#include "common/twlmenusettings.h"
 
 #ifndef __CARD_LAUNCH__
 #define __CARD_LAUNCH__
@@ -9,7 +9,7 @@ const char *unlaunchAutoLoadID = "AutoLoadInfo";
 const char16_t hiyaNdsPath[] = u"sdmc:/hiya.dsi";
 
 void unlaunchSetHiyaBoot(void) {
-	if (access("sdmc:/hiya.dsi", F_OK) != 0) return;
+	if (access("sd:/hiya.dsi", F_OK) != 0) return;
 
 	memcpy((u8*)0x02000800, unlaunchAutoLoadID, 12);
 	*(u16*)(0x0200080C) = 0x3F0;		// Unlaunch Length for CRC16 (fixed, must be 3F0h)
@@ -40,29 +40,31 @@ void dsiLaunchSystemSettings()
     char tmdpath[256];
     u8 titleID[4] = {0, 0x42, 0x4E, 0x48};
 	switch (ms().sysRegion) {
-		case 0:
+		case TWLSettings::ERegionJapan:
 			titleID[0] = 0x4A;		// JPN
 			break;
-		case 1:
+		case TWLSettings::ERegionUSA:
 			titleID[0] = 0x45;		// USA
 			break;
-		case 2:
-		case 3:
-			titleID[0] = 0x56;		// EUR/AUS
+		case TWLSettings::ERegionEurope:
+			titleID[0] = 0x50;		// EUR
 			break;
-		case 4:
+		case TWLSettings::ERegionAustralia:
+			titleID[0] = 0x55;		// AUS
+			break;
+		case TWLSettings::ERegionChina:
 			titleID[0] = 0x43;		// CHN
 			break;
-		case 5:
+		case TWLSettings::ERegionKorea:
 			titleID[0] = 0x4B;		// KOR
+			break;
+		case TWLSettings::ERegionDefault:
 			break;
 	}
 	if (ms().sysRegion == -1) {
-		for (u8 i = 0x41; i <= 0x5A; i++)
-		{
+		for (u8 i = 0x41; i <= 0x5A; i++) {
 			snprintf(tmdpath, sizeof(tmdpath), "sd:/title/00030015/484e42%x/content/title.tmd", i);
-			if (access(tmdpath, F_OK) == 0)
-			{
+			if (access(tmdpath, F_OK) == 0) {
 				titleID[0] = i;
 				break;
 			}
@@ -86,7 +88,6 @@ void dsiLaunchSystemSettings()
     *(u16 *)(0x02000306) = swiCRC16(0xFFFF, (void *)0x02000308, 0x18);
 
 	unlaunchSetHiyaBoot();
-
 	DC_FlushAll();						// Make reboot not fail
     fifoSendValue32(FIFO_USER_02, 1); // Reboot into System Settings
 }

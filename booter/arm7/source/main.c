@@ -29,7 +29,10 @@
 ---------------------------------------------------------------------------------*/
 #include <nds.h>
 
+#define SD_IRQ_STATUS (*(vu32*)0x400481C)
+
 void my_installSystemFIFO(void);
+void my_sdmmc_get_cid(int devicenumber, u32 *cid);
 
 //---------------------------------------------------------------------------------
 void ReturntoDSiMenu() {
@@ -42,7 +45,7 @@ void ReturntoDSiMenu() {
 //---------------------------------------------------------------------------------
 void VblankHandler(void) {
 //---------------------------------------------------------------------------------
-	if(fifoCheckValue32(FIFO_USER_01)) {
+	if (fifoCheckValue32(FIFO_USER_01)) {
 		ReturntoDSiMenu();
 	}
 }
@@ -71,15 +74,21 @@ int main() {
 		*(vu16*)(0x04004012) = 0x1988;
 		*(vu16*)(0x04004014) = 0x264C;
 		*(vu16*)(0x04004C02) = 0x4000;	// enable powerbutton irq (Fix for Unlaunch 1.3)
+
+		if ((REG_SCFG_ROM & BIT(1)) || (REG_SCFG_ROM & BIT(9))) {
+			ReturntoDSiMenu(); // Reboot if DS BIOS is set while in DSi mode
+		}
 	}
 
-	*(vu16*)(0x04004700) |= BIT(13);	// Set 48khz sound/mic frequency
+	if ((REG_SNDEXTCNT & SNDEXTCNT_ENABLE) && !(REG_SNDEXTCNT & BIT(13))) {
+		*(vu16*)0x04004700 |= BIT(13);	// Set 48khz sound/mic frequency
+	}
 
 	// clear sound registers
 	dmaFillWords(0, (void*)0x04000400, 0x100);
 
 	REG_SOUNDCNT |= SOUND_ENABLE;
-	writePowerManagement(PM_CONTROL_REG, ( readPowerManagement(PM_CONTROL_REG) & ~PM_SOUND_MUTE ) | PM_SOUND_AMP );
+	writePowerManagement(PM_CONTROL_REG, ( readPowerManagement(PM_CONTROL_REG) & ~PM_SOUND_MUTE ) | PM_SOUND_AMP);
 	powerOn(POWER_SOUND);
 
 	readUserSettings();
@@ -98,14 +107,24 @@ int main() {
 	irqSet(IRQ_VCOUNT, VcountHandler);
 	irqSet(IRQ_VBLANK, VblankHandler);
 
-	irqEnable( IRQ_VBLANK | IRQ_VCOUNT );
+	irqEnable(IRQ_VBLANK | IRQ_VCOUNT);
 
 	setPowerButtonCB(powerButtonCB);
 	
+	// *(u8*)0x0280FFFF = i2cReadRegister(0x4A, 0x71);
+
 	// Keep the ARM7 mostly idle
 	while (!exitflag) {
-		if ( 0 == (REG_KEYINPUT & (KEY_SELECT | KEY_START | KEY_L | KEY_R))) {
+		if ((REG_KEYINPUT & (KEY_SELECT | KEY_START | KEY_L | KEY_R)) == 0) {
 			exitflag = true;
+		}
+		if (*(u32*)0x02FFFD0C == 0x54534453) { // 'SDST'
+			fifoSendValue32(FIFO_USER_04, SD_IRQ_STATUS);
+			*(u32*)0x02FFFD0C = 0;
+		}
+		if (*(u32*)0x02FFFD0C == 0x47444943) { // 'CIDG'
+			my_sdmmc_get_cid(0, (u32*)0x02810000);
+			*(u32*)0x02FFFD0C = 0;
 		}
 		// fifocheck();
 		swiWaitForVBlank();

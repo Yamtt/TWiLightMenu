@@ -46,7 +46,8 @@ Helpful information:
 #undef ARM9
 #define ARM7
 #include <nds/arm7/audio.h>
-#include "tonccpy.h"
+#include <string.h> // memcmp
+#include "common/tonccpy.h"
 #include "sdmmc.h"
 #include "fat.h"
 #include "dldi_patcher.h"
@@ -83,28 +84,28 @@ bool sdRead = false;
 #define FW_READ        0x03
 
 void boot_readFirmware (uint32 address, uint8 * buffer, uint32 size) {
-  uint32 index;
+	uint32 index;
 
-  // Read command
-  while (REG_SPICNT & SPI_BUSY);
-  REG_SPICNT = SPI_ENABLE | SPI_CONTINUOUS | SPI_DEVICE_NVRAM;
-  REG_SPIDATA = FW_READ;
-  while (REG_SPICNT & SPI_BUSY);
+	// Read command
+	while (REG_SPICNT & SPI_BUSY);
+	REG_SPICNT = SPI_ENABLE | SPI_CONTINUOUS | SPI_DEVICE_NVRAM;
+	REG_SPIDATA = FW_READ;
+	while (REG_SPICNT & SPI_BUSY);
 
-  // Set the address
-  REG_SPIDATA =  (address>>16) & 0xFF;
-  while (REG_SPICNT & SPI_BUSY);
-  REG_SPIDATA =  (address>>8) & 0xFF;
-  while (REG_SPICNT & SPI_BUSY);
-  REG_SPIDATA =  (address) & 0xFF;
-  while (REG_SPICNT & SPI_BUSY);
+	// Set the address
+	REG_SPIDATA = (address>>16) & 0xFF;
+	while (REG_SPICNT & SPI_BUSY);
+	REG_SPIDATA = (address>>8) & 0xFF;
+	while (REG_SPICNT & SPI_BUSY);
+	REG_SPIDATA = (address) & 0xFF;
+	while (REG_SPICNT & SPI_BUSY);
 
-  for (index = 0; index < size; index++) {
-    REG_SPIDATA = 0;
-    while (REG_SPICNT & SPI_BUSY);
-    buffer[index] = REG_SPIDATA & 0xFF;
-  }
-  REG_SPICNT = 0;
+	for (index = 0; index < size; index++) {
+		REG_SPIDATA = 0;
+		while (REG_SPICNT & SPI_BUSY);
+		buffer[index] = REG_SPIDATA & 0xFF;
+	}
+	REG_SPICNT = 0;
 }
 
 
@@ -184,6 +185,13 @@ void resetMemory_ARM7 (void)
 	}
 
 	REG_SOUNDCNT = 0;
+	REG_SNDCAP0CNT = 0;
+	REG_SNDCAP1CNT = 0;
+
+	REG_SNDCAP0DAD = 0;
+	REG_SNDCAP0LEN = 0;
+	REG_SNDCAP1DAD = 0;
+	REG_SNDCAP1LEN = 0;
 
 	//clear out ARM7 DMA channels and timers
 	for (i=0; i<4; i++) {
@@ -234,8 +242,6 @@ void resetMemory_ARM7 (void)
 void loadBinary_ARM7 (u32 fileCluster)
 {
 	if (loadFromRam) {
-		bool isDSi = (*(vu32*)(0x08240000) != 1);
-
 		//u32 ARM9_SRC = *(u32*)(TWL_HEAD+0x20);
 		char* ARM9_DST = (char*)*(u32*)(TWL_HEAD+0x28);
 		u32 ARM9_LEN = *(u32*)(TWL_HEAD+0x2C);
@@ -243,8 +249,8 @@ void loadBinary_ARM7 (u32 fileCluster)
 		char* ARM7_DST = (char*)*(u32*)(TWL_HEAD+0x38);
 		u32 ARM7_LEN = *(u32*)(TWL_HEAD+0x3C);
 
-		tonccpy(ARM9_DST, (char*)(isDSi ? 0x02800000 : 0x09000000), ARM9_LEN);
-		tonccpy(ARM7_DST, (char*)(isDSi ? 0x02B80000 : 0x09380000), ARM7_LEN);
+		tonccpy(ARM9_DST, (char*)0x02800000, ARM9_LEN);
+		tonccpy(ARM7_DST, (char*)0x02B80000, ARM7_LEN);
 
 		// first copy the header to its proper location, excluding
 		// the ARM9 start address, so as not to start it
@@ -268,8 +274,7 @@ void loadBinary_ARM7 (u32 fileCluster)
 				tonccpy(ARM7i_DST, (char*)0x02C80000, ARM7i_LEN);
 		}
 
-		if (isDSi)
-			toncset((void*)0x02800000, 0, 0x500000);
+		toncset((void*)0x02800000, 0, 0x500000);
 
 		return;
 	}
@@ -349,7 +354,7 @@ int main (void) {
 	u32 fileCluster = storedFileCluster;
 	if (!loadFromRam) {
 		// Init card
-		if(!FAT_InitFiles(initDisc))
+		if (!FAT_InitFiles(initDisc))
 		{
 			return -1;
 		}
@@ -361,6 +366,13 @@ int main (void) {
 		{
 			return -1;
 		}
+	}
+
+	if ((REG_SCFG_EXT != 0) && (memcmp((u8*)0x02000000, (u8*)0x02400000, 0x4000) != 0)
+	 && (*(u8*)0x02400400 != 0) && (*(u8*)0x02400401 == 0) && (*(u8*)0x02400402 == 0) && (*(u8*)0x02400404 == 0) && (*(u8*)0x02400448 != 0)) {
+		// Restore TWLCFG backup
+		tonccpy((u8*)0x02000000, (u8*)0x02400000, 0x4000);
+		toncset((u8*)0x02400000, 0, 0x4000);
 	}
 
 	// ARM9 clears its memory part 2

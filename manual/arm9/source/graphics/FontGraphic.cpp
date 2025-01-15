@@ -2,8 +2,6 @@
 
 #include "common/tonccpy.h"
 
-u8 *FontGraphic::lastUsedLoc = (u8*)0x08000000;
-
 u8 FontGraphic::textBuf[2][256 * 192];
 
 std::map<char16_t, std::array<char16_t, 3>> FontGraphic::arabicPresentationForms = {
@@ -72,15 +70,15 @@ bool FontGraphic::isNumber(char16_t c) {
 }
 
 char16_t FontGraphic::arabicForm(char16_t current, char16_t prev, char16_t next) {
-	if(isArabic(current)) {
+	if (isArabic(current)) {
 		// If previous should be connected to
-		if((prev >= 0x626 && prev <= 0x62E && prev != 0x627 && prev != 0x629) || (prev >= 0x633 && prev <= 0x64A && prev != 0x648)) {
-			if(isArabic(next)) // If next is arabic, medial
+		if ((prev >= 0x626 && prev <= 0x62E && prev != 0x627 && prev != 0x629) || (prev >= 0x633 && prev <= 0x64A && prev != 0x648)) {
+			if (isArabic(next)) // If next is arabic, medial
 				return arabicPresentationForms[current][1];
 			else // If not, final
 				return arabicPresentationForms[current][2];
 		} else {
-			if(isArabic(next)) // If next is arabic, initial
+			if (isArabic(next)) // If next is arabic, initial
 				return arabicPresentationForms[current][0];
 			else // If not, isolated
 				return current;
@@ -90,26 +88,24 @@ char16_t FontGraphic::arabicForm(char16_t current, char16_t prev, char16_t next)
 	return current;
 }
 
-FontGraphic::FontGraphic(const std::vector<std::string> &paths, bool useExpansionPak) : useExpansionPak(useExpansionPak) {
-	FILE *file = nullptr;
-	for(const auto &path : paths) {
+FontGraphic::FontGraphic(const std::vector<std::string> &paths, const bool set_useTileCache) {
+	for (const auto &path : paths) {
 		file = fopen(path.c_str(), "rb");
-		if(file)
+		if (file)
 			break;
 	}
 
-	if(file) {
-		if(useExpansionPak && *(u16*)(0x020000C0) == 0 && lastUsedLoc == (u8*)0x08000000) {
-			lastUsedLoc += 0x01000000;
-		}
-
+	useTileCache = set_useTileCache;
+	if (file) {
 		// Get file size
 		fseek(file, 0, SEEK_END);
 		u32 fileSize = ftell(file);
 
 		// Skip font info
 		fseek(file, 0x14, SEEK_SET);
-		fseek(file, fgetc(file)-1, SEEK_CUR);
+		tileOffset = fgetc(file);
+		fseek(file, tileOffset-1, SEEK_CUR);
+		tileOffset += 0x20;
 
 		// Load glyph info
 		u32 chunkSize;
@@ -121,14 +117,8 @@ FontGraphic::FontGraphic(const std::vector<std::string> &paths, bool useExpansio
 		// Load character glyphs
 		tileAmount = (chunkSize - 0x10) / tileSize;
 		fseek(file, 4, SEEK_CUR);
-		if(useExpansionPak) {
-			fontTiles = lastUsedLoc;
-			lastUsedLoc += tileSize * tileAmount;
-
-			u8 *buf = new u8[tileSize * tileAmount];
-			fread(buf, tileSize, tileAmount, file);
-			tonccpy(fontTiles, buf, tileSize * tileAmount);
-			delete[] buf;
+		if (useTileCache) {
+			fontTiles = new u8[tileSize * (tileAmount>tileCacheCount ? tileCacheCount : tileAmount)];
 		} else {
 			fontTiles = new u8[tileSize * tileAmount];
 			fread(fontTiles, tileSize, tileAmount, file);
@@ -141,32 +131,17 @@ FontGraphic::FontGraphic(const std::vector<std::string> &paths, bool useExpansio
 		fseek(file, locHDWC-4, SEEK_SET);
 		fread(&chunkSize, 4, 1, file);
 		fseek(file, 8, SEEK_CUR);
-		if(useExpansionPak) {
-			fontWidths = lastUsedLoc;
-			lastUsedLoc += 3 * tileAmount;
-
-			u8 *buf = new u8[3 * tileAmount];
-			fread(buf, 3, tileAmount, file);
-			tonccpy(fontWidths, buf, 3 * tileAmount);
-			delete[] buf;
-		} else {
-			fontWidths = new u8[3 * tileAmount];
-			fread(fontWidths, 3, tileAmount, file);
-		}
+		fontWidths = new u8[3 * tileAmount];
+		fread(fontWidths, 3, tileAmount, file);
 
 		// Load character maps
-		if(useExpansionPak) {
-			fontMap = (u16*)lastUsedLoc;
-			lastUsedLoc += tileAmount * sizeof(u16);
-		} else {
-			fontMap = new u16[tileAmount];
-		}
+		fontMap = new u16[tileAmount];
 
 		fseek(file, 0x28, SEEK_SET);
 		u32 locPAMC, mapType;
 		fread(&locPAMC, 4, 1, file);
 
-		while(locPAMC < fileSize) {
+		while (locPAMC && locPAMC < fileSize) {
 			u16 firstChar, lastChar;
 			fseek(file, locPAMC, SEEK_SET);
 			fread(&firstChar, 2, 1, file);
@@ -178,12 +153,12 @@ FontGraphic::FontGraphic(const std::vector<std::string> &paths, bool useExpansio
 				case 0: {
 					u16 firstTile;
 					fread(&firstTile, 2, 1, file);
-					for(unsigned i=firstChar;i<=lastChar;i++) {
+					for (unsigned i=firstChar;i<=lastChar;i++) {
 						fontMap[firstTile+(i-firstChar)] = i;
 					}
 					break;
 				} case 1: {
-					for(int i=firstChar;i<=lastChar;i++) {
+					for (int i=firstChar;i<=lastChar;i++) {
 						u16 tile;
 						fread(&tile, 2, 1, file);
 						fontMap[tile] = i;
@@ -192,7 +167,7 @@ FontGraphic::FontGraphic(const std::vector<std::string> &paths, bool useExpansio
 				} case 2: {
 					u16 groupAmount;
 					fread(&groupAmount, 2, 1, file);
-					for(int i=0;i<groupAmount;i++) {
+					for (int i=0;i<groupAmount;i++) {
 						u16 charNo, tileNo;
 						fread(&charNo, 2, 1, file);
 						fread(&tileNo, 2, 1, file);
@@ -202,22 +177,20 @@ FontGraphic::FontGraphic(const std::vector<std::string> &paths, bool useExpansio
 				}
 			}
 		}
-		fclose(file);
 		questionMark = getCharIndex(0xFFFD);
-		if(questionMark == 0)
+		if (questionMark == 0)
 			questionMark = getCharIndex('?');
 	}
 }
 
 FontGraphic::~FontGraphic(void) {
-	if(!useExpansionPak) {
-		if(fontTiles)
-			delete[] fontTiles;
-		if(fontWidths)
-			delete[] fontWidths;
-		if(fontMap)
-			delete[] fontMap;
-	}
+	fclose(file);
+	if (fontTiles)
+		delete[] fontTiles;
+	if (fontWidths)
+		delete[] fontWidths;
+	if (fontMap)
+		delete[] fontMap;
 }
 
 u16 FontGraphic::getCharIndex(char16_t c) {
@@ -225,13 +198,13 @@ u16 FontGraphic::getCharIndex(char16_t c) {
 	int left = 0;
 	int right = tileAmount;
 
-	while(left <= right) {
+	while (left <= right) {
 		int mid = left + ((right - left) / 2);
-		if(fontMap[mid] == c) {
+		if (fontMap[mid] == c) {
 			return mid;
 		}
 
-		if(fontMap[mid] < c) {
+		if (fontMap[mid] < c) {
 			left = mid + 1;
 		} else {
 			right = mid - 1;
@@ -243,14 +216,14 @@ u16 FontGraphic::getCharIndex(char16_t c) {
 
 std::u16string FontGraphic::utf8to16(std::string_view text) {
 	std::u16string out;
-	for(uint i=0;i<text.size();) {
-		char16_t c;
-		if(!(text[i] & 0x80)) {
+	for (uint i=0;i<text.size();) {
+		char16_t c = 0;
+		if (!(text[i] & 0x80)) {
 			c = text[i++];
-		} else if((text[i] & 0xE0) == 0xC0) {
+		} else if ((text[i] & 0xE0) == 0xC0) {
 			c  = (text[i++] & 0x1F) << 6;
 			c |=  text[i++] & 0x3F;
-		} else if((text[i] & 0xF0) == 0xE0) {
+		} else if ((text[i] & 0xF0) == 0xE0) {
 			c  = (text[i++] & 0x0F) << 12;
 			c |= (text[i++] & 0x3F) << 6;
 			c |=  text[i++] & 0x3F;
@@ -265,7 +238,7 @@ std::u16string FontGraphic::utf8to16(std::string_view text) {
 int FontGraphic::calcWidth(std::u16string_view text) {
 	uint x = 0;
 
-	for(auto it = text.begin(); it != text.end(); ++it) {
+	for (auto it = text.begin(); it != text.end(); ++it) {
 		u16 index = getCharIndex(arabicForm(*it, it > text.begin() ? *(it - 1) : 0, it < text.end() - 1 ? *(it + 1) : 0));
 		x += fontWidths[(index * 3) + 2];
 	}
@@ -275,9 +248,9 @@ int FontGraphic::calcWidth(std::u16string_view text) {
 
 ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view text, Alignment align, bool rtl) {
 	// If RTL isn't forced, check for RTL text
-	if(!rtl) {
-		for(const auto c : text) {
-			if(isStrongRTL(c)) {
+	if (!rtl) {
+		for (const auto c : text) {
+			if (isStrongRTL(c)) {
 				rtl = true;
 				break;
 			}
@@ -291,7 +264,7 @@ ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view te
 			break;
 		} case Alignment::center: {
 			size_t newline = text.find('\n');
-			while(newline != text.npos) {
+			while (newline != text.npos) {
 				print(x, y, top, text.substr(0, newline), align, rtl);
 				text = text.substr(newline + 1);
 				newline = text.find('\n');
@@ -302,7 +275,7 @@ ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view te
 			break;
 		} case Alignment::right: {
 			size_t newline = text.find('\n');
-			while(newline != text.npos) {
+			while (newline != text.npos) {
 				print(x - calcWidth(text.substr(0, newline)), y, top, text.substr(0, newline), Alignment::left, rtl);
 				text = text.substr(newline + 1);
 				newline = text.find('\n');
@@ -315,11 +288,11 @@ ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view te
 	const int xStart = x;
 
 	// Loop through string and print it
-	for(auto it = (rtl ? text.end() - 1 : text.begin()); true; it += (rtl ? -1 : 1)) {
+	for (auto it = (rtl ? text.end() - 1 : text.begin()); true; it += (rtl ? -1 : 1)) {
 		// If we hit the end of the string in an LTR section of an RTL
 		// string, it may not be done, if so jump back to printing RTL
-		if(it == (rtl ? text.begin() - 1 : text.end())) {
-			if(ltrBegin == text.end() || (ltrBegin == text.begin() && ltrEnd == text.end())) {
+		if (it == (rtl ? text.begin() - 1 : text.end())) {
+			if (ltrBegin == text.end() || (ltrBegin == text.begin() && ltrEnd == text.end())) {
 				break;
 			} else {
 				it = ltrBegin;
@@ -329,24 +302,24 @@ ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view te
 		}
 
 		// If at the end of an LTR section within RTL, jump back to the RTL
-		if(it == ltrEnd && ltrBegin != text.end()) {
-			if(ltrBegin == text.begin() && (!isWeak(*ltrBegin) || isNumber(*ltrBegin)))
+		if (it == ltrEnd && ltrBegin != text.end()) {
+			if (ltrBegin == text.begin() && (!isWeak(*ltrBegin) || isNumber(*ltrBegin)))
 				break;
 
 			it = ltrBegin;
 			ltrBegin = text.end();
 			rtl = true;
 		// If in RTL and hit a non-RTL character that's not punctuation, switch to LTR
-		} else if(rtl && !isStrongRTL(*it) && (!isWeak(*it) || isNumber(*it))) {
+		} else if (rtl && !isStrongRTL(*it) && (!isWeak(*it) || isNumber(*it))) {
 			// Save where we are as the end of the LTR section
 			ltrEnd = it + 1;
 
 			// Go back until an RTL character or the start of the string
 			bool allNumbers = true;
-			while(!isStrongRTL(*it) && it != text.begin()) {
+			while (!isStrongRTL(*it) && it != text.begin()) {
 				// Check for if the LTR section is only numbers,
 				// if so they won't be removed from the end
-				if(allNumbers && !isNumber(*it) && !isWeak(*it))
+				if (allNumbers && !isNumber(*it) && !isWeak(*it))
 					allNumbers = false;
 				it--;
 			}
@@ -355,29 +328,29 @@ ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view te
 			ltrBegin = it;
 
 			// If on an RTL char right now, add one
-			if(isStrongRTL(*it)) {
+			if (isStrongRTL(*it)) {
 				it++;
 			}
 
 			// Remove all punctuation and, if the section isn't only numbers,
 			// numbers from the end of the LTR section
-			if(allNumbers) {
-				while(isWeak(*it) && !isNumber(*it)) {
-					if(it != text.begin())
+			if (allNumbers) {
+				while (isWeak(*it) && !isNumber(*it)) {
+					if (it != text.begin())
 						ltrBegin++;
 					it++;
 				}
 			} else {
-				while(isWeak(*it)) {
-					if(it != text.begin())
+				while (isWeak(*it)) {
+					if (it != text.begin())
 						ltrBegin++;
 					it++;
 				}
 			}
 
 			// But then allow all numbers directly touching the strong LTR or with 1 weak between
-			while((it - 1 >= text.begin() && isNumber(*(it - 1))) || (it - 2 >= text.begin() && isWeak(*(it - 1)) && isNumber(*(it - 2)))) {
-				if(it - 1 != text.begin())
+			while ((it - 1 >= text.begin() && isNumber(*(it - 1))) || (it - 2 >= text.begin() && isWeak(*(it - 1)) && isNumber(*(it - 2)))) {
+				if (it - 1 != text.begin())
 					ltrBegin--;
 				it--;
 			}
@@ -385,7 +358,7 @@ ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view te
 			rtl = false;
 		}
 
-		if(*it == '\n') {
+		if (*it == '\n') {
 			x = xStart;
 			y += tileHeight;
 			continue;
@@ -393,7 +366,7 @@ ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view te
 
 		// Brackets are flipped in RTL
 		u16 index;
-		if(rtl) {
+		if (rtl) {
 			switch(*it) {
 				case '(':
 					index = getCharIndex(')');
@@ -415,7 +388,7 @@ ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view te
 					break;
 				case u'ا':
 					// لا ligature
-					if(it > text.begin() && *(it - 1) == u'ل') {
+					if (it > text.begin() && *(it - 1) == u'ل') {
 						index = getCharIndex(arabicForm(u'ﻻ', it - 1 > text.begin() ? *(it - 2) : 0, it < text.end() - 1 ? *(it + 1) : 0));
 						--it;
 						break;
@@ -430,14 +403,60 @@ ITCM_CODE void FontGraphic::print(int x, int y, bool top, std::u16string_view te
 			index = getCharIndex(*it);
 		}
 
-		// Don't draw off screen chars
-		if(x >= 0 && x + fontWidths[(index * 3) + 2] < 256 && y >= 0 && y + tileHeight < 192) {
-			u8 *dst = textBuf[top] + x + fontWidths[(index * 3)];
-			for(int i = 0; i < tileHeight; i++) {
-				for(int j = 0; j < tileWidth; j++) {
-					u8 px = fontTiles[(index * tileSize) + (i * tileWidth + j) / 4] >> ((3 - ((i * tileWidth + j) % 4)) * 2) & 3;
-					if(px)
-						dst[(y + i) * 256 + j] = px + 0xF8;
+		if (useTileCache) {
+			bool found = false;
+			bool overwrite = true;
+			u8 cachePos = 0;
+			for (u8 i = 0; i < tileCacheCount; i++) {
+				if (!cacheAllocated[i]) {
+					indexCache[i] = index;
+					cachePos = i;
+					cacheAllocated[i] = true;
+					overwrite = false;
+					break;
+				} else if (indexCache[i] == index) {
+					cachePos = i;
+					found = true;
+					overwrite = false;
+					break;
+				}
+			}
+
+			if (overwrite) {
+				nextCachePos++;
+				if (nextCachePos == tileCacheCount) {
+					nextCachePos = 0;
+				}
+				cachePos = nextCachePos;
+				indexCache[cachePos] = index;
+			}
+
+			if (!found && file) {
+				fseek(file, tileOffset+(index * tileSize), SEEK_SET);
+				fread(fontTiles+(cachePos * tileSize), tileSize, 1, file);
+			}
+
+			// Don't draw off screen chars
+			if (x >= 0 && x + fontWidths[(index * 3) + 2] < 256 && y >= 0 && y + tileHeight < 192) {
+				u8 *dst = textBuf[top] + x + fontWidths[(index * 3)];
+				for (int i = 0; i < tileHeight; i++) {
+					for (int j = 0; j < tileWidth; j++) {
+						u8 px = fontTiles[(cachePos * tileSize) + (i * tileWidth + j) / 4] >> ((3 - ((i * tileWidth + j) % 4)) * 2) & 3;
+						if (px)
+							dst[(y + i) * 256 + j] = px + 0xF6;
+					}
+				}
+			}
+		} else {
+			// Don't draw off screen chars
+			if (x >= 0 && x + fontWidths[(index * 3) + 2] < 256 && y >= 0 && y + tileHeight < 192) {
+				u8 *dst = textBuf[top] + x + fontWidths[(index * 3)];
+				for (int i = 0; i < tileHeight; i++) {
+					for (int j = 0; j < tileWidth; j++) {
+						u8 px = fontTiles[(index * tileSize) + (i * tileWidth + j) / 4] >> ((3 - ((i * tileWidth + j) % 4)) * 2) & 3;
+						if (px)
+							dst[(y + i) * 256 + j] = px + 0xF6;
+					}
 				}
 			}
 		}

@@ -17,24 +17,26 @@ include $(DEVKITARM)/ds_rules
 # SOURCES is a list of directories containing source code
 # INCLUDES is a list of directories containing extra header files
 #---------------------------------------------------------------------------------
+UNIVERSAL	:=	../../universal
 TARGET		:=	booter
 BUILD		:=	build
-SOURCES		:=	source ../../universal/sdmmc/arm7/source
-INCLUDES	:=	include build ../../universal/sdmmc/arm7/include
+SOURCES		:=	source $(UNIVERSAL)/sdmmc/arm7/source
+INCLUDES	:=	include build $(UNIVERSAL)/arm7/include $(UNIVERSAL)/sdmmc/arm7/include
 
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
 ARCH	:=	-march=armv4t -mthumb -mthumb-interwork
 
-CFLAGS	:=	-g -Wall -O2\
+CFLAGS	:=	-g -Wall -O2 \
  		-mcpu=arm7tdmi -mtune=arm7tdmi -fomit-frame-pointer\
 		-ffast-math \
+		-flto \
 		$(ARCH)
 
 CFLAGS	+=	$(INCLUDE) -DARM7
 
-ASFLAGS	:=	-g $(ARCH)
+ASFLAGS	:=	-g $(ARCH) -flto
 LDFLAGS	=	-specs=ds_arm7.specs -g $(ARCH) -Wl,--nmagic -Wl,-Map,$(notdir $*).map
 
 

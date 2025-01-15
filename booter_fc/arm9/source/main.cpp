@@ -25,12 +25,13 @@
 #include <fat.h>
 #include <sys/stat.h>
 #include <limits.h>
+#include <vector>
 
 #include <string.h>
 #include <unistd.h>
 
 #include "nds_loader_arm9.h"
-#include "tonccpy.h"
+#include "common/tonccpy.h"
 
 using namespace std;
 
@@ -44,34 +45,42 @@ int main(int argc, char **argv) {
 	extern char *fake_heap_end;
 	*fake_heap_end = 0;
 
-	REG_SCFG_CLK &= (BIT(1) | BIT(2));	// Disable DSP and Camera Interface clocks
+	REG_SCFG_CLK &= ~(BIT(1) | BIT(2));	// Disable DSP and Camera Interface clocks
 
 	// Turn on screen backlights if they're disabled
 	powerOn(PM_BACKLIGHT_TOP);
 	powerOn(PM_BACKLIGHT_BOTTOM);
 	
 	REG_SCFG_CLK = 0x85;					// TWL clock speed
-	REG_SCFG_EXT = 0x8307F100;				// Extended memory, extended VRAM, etc.
+	REG_SCFG_EXT = 0x8307F100;				// Extended memory, 32-bit VRAM bus, etc.
 
-	bool isRegularDS = true;
-	u16 arm7_SNDEXCNT = fifoGetValue32(FIFO_USER_07);
-	if (arm7_SNDEXCNT != 0) isRegularDS = false;	// If sound frequency setting is found, then the console is not a DS Phat/Lite
+	//consoleDemoInit();
 
-	/*bool sdFound = false;
-	#ifndef CYCLODSI
+	bool isRegularDS = fifoGetValue32(FIFO_USER_07);
+
+	//iprintf("Initing flashcard...\n");
+	bool flashcardFound = fatMountSimple("fat", dldiGetInternal());
 	if (isDSiMode() || (!isRegularDS && REG_SCFG_EXT != 0)) {
 		extern const DISC_INTERFACE __my_io_dsisd;
-		sdFound = fatMountSimple("sd", &__my_io_dsisd);
+		//iprintf("Initing SD...\n");
+		fatMountSimple("sd", &__my_io_dsisd);
 	}
-	#endif*/
-	bool flashcardFound = fatMountSimple("fat", dldiGetInternal());
+	bool primaryIsSd = (access("sd:/_nds/primary", F_OK) == 0 || access("fat:/_nds/TWiLightMenu/main.srldr", F_OK) != 0);
+	if (REG_SCFG_EXT != 0) {
+		FILE* twlCfgFile = fopen(primaryIsSd ? "sd:/_nds/TWiLightMenu/16KBcache.bin" : "fat:/_nds/TWiLightMenu/16KBcache.bin", "rb");
+		fread((void*)0x02400000, 1, 0x4000, twlCfgFile);
+		fclose(twlCfgFile);
+	}
 
 	if (/* !sdFound && */ !flashcardFound) {
 		consoleDemoInit();
 		printf ("FAT init failed!\n");
 	} else {
-		int err = 0;
-		err = runNdsFile ((/*sdFound ? "sd:/_nds/TWiLightMenu/main.srldr" :*/ "fat:/_nds/TWiLightMenu/main.srldr"), 0, NULL);
+		vector<char *> argarray;
+		argarray.push_back((char*)(primaryIsSd ? "sd:/_nds/TWiLightMenu/main.srldr" : "fat:/_nds/TWiLightMenu/main.srldr"));
+
+		//iprintf(sdFound ? "Running from SD...\n" : "Running from flashcard...\n");
+		int err = runNdsFile (argarray[0], argarray.size(), (const char**)&argarray[0]);
 
 		consoleDemoInit();
 
@@ -86,12 +95,8 @@ int main(int argc, char **argv) {
 
 	while (1) {
 		scanKeys();
-		if (keysHeld() & KEY_B) {
-			if (isRegularDS) {
-				systemShutDown();
-			} else {
-				fifoSendValue32(FIFO_USER_01, 1);	// Tell ARM7 to reboot into System Menu (power-off/sleep mode screen skipped)
-			}
+		if (keysDown() & KEY_B) {
+			fifoSendValue32(FIFO_USER_01, 1);	// Tell ARM7 to reboot or poweroff depending on whether DS or DSi
 			break;
 		}
 		swiWaitForVBlank();

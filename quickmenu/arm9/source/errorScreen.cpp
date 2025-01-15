@@ -3,20 +3,18 @@
 #include <maxmod9.h>
 
 // #include "autoboot.h"
-// #include "common/systemdetails.h"
-#include "common/dsimenusettings.h"
+#include "common/twlmenusettings.h"
+#include "common/systemdetails.h"
+#include "common/flashcard.h"
 #include "graphics/fontHandler.h"
 #include "common/tonccpy.h"
 #include "language.h"
 
+extern u16* colorTable;
+
 extern const char *unlaunchAutoLoadID;
 extern char unlaunchDevicePath[256];
 extern void unlaunchSetHiyaBoot();
-
-extern bool arm7SCFGLocked;
-
-extern int consoleModel;
-extern int launcherApp;
 
 static int timeTillChangeToNonExtendedImage = 0;
 static bool showNonExtendedImage = false;
@@ -24,8 +22,8 @@ static bool showNonExtendedImage = false;
 void checkSdEject(void) {
 	if (!ms().sdRemoveDetect) return;
 
-	if (*(u8*)(0x023FF002) == 0 || !isDSiMode()) {
-		if(!showNonExtendedImage) {
+	if (sys().sdStatus() == SystemDetails::ESDStatus::SDOk || !isDSiMode() || !sdFound()) {
+		if (!showNonExtendedImage) {
 			timeTillChangeToNonExtendedImage++;
 			if (timeTillChangeToNonExtendedImage > 10) {
 				showNonExtendedImage = true;
@@ -49,13 +47,18 @@ void checkSdEject(void) {
 		0xD6B5,
 		0xFFFF,
 	};
+	if (colorTable) {
+		for (int i = 0; i < 4; i++) {
+			palette[i] = colorTable[palette[i]];
+		}
+	}
 	tonccpy(BG_PALETTE, palette, sizeof(palette));
 	tonccpy(BG_PALETTE_SUB, palette, sizeof(palette));
 
 	swiWaitForVBlank();
 	clearText();
 
-	if(showNonExtendedImage) {
+	if (showNonExtendedImage) {
 		printSmall(false, 0, 45, STR_SD_WAS_REMOVED, Alignment::center);
 		printSmall(false, 0, 75, STR_REINSERT_SD_CARD, Alignment::center);
 	} else {
@@ -63,7 +66,7 @@ void checkSdEject(void) {
 		printSmall(false, 0, 67, STR_DISABLE_SD_REMOVAL_CHECK, Alignment::center);
 	}
 
-	while(1) {
+	while (1) {
 		// Currently not working
 		/*scanKeys();
 		if (keysDown() & KEY_B) {
@@ -88,7 +91,7 @@ void checkSdEject(void) {
 			fifoSendValue32(FIFO_USER_02, 1);	// ReturntoDSiMenu
 			swiWaitForVBlank();
 		}
-		if (*(u8*)(0x02FFF002) == 2 && !arm7SCFGLocked) {
+		if (*(u8*)(0x02FFF002) == 2 && !sys().arm7SCFGLocked()) {
 			if (consoleModel < 2) {
 				unlaunchSetHiyaBoot();
 			}

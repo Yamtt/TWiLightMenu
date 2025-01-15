@@ -1,9 +1,12 @@
 #include "gif.hpp"
 #include "myDSiMode.h"
+#include "common/twlmenusettings.h"
 #include "common/tonccpy.h"
 #include "lzw.hpp"
 
 #include <stdio.h>
+
+extern u16* colorTable;
 
 std::vector<Gif *> Gif::_animating;
 
@@ -44,16 +47,23 @@ void Gif::displayFrame(void) {
 		}
 	}
 
-	std::vector<u16> &colorTable = frame.descriptor.lctFlag ? frame.lct : _gct;
+	std::vector<u16> &gifColorTable = frame.descriptor.lctFlag ? frame.lct : _gct;
+	u16* bgPalette = _top ? BG_PALETTE : BG_PALETTE_SUB;
 
-	tonccpy(_top ? BG_PALETTE : BG_PALETTE_SUB, colorTable.data(), colorTable.size() * 2);
-	tonccpy(_top ? BG_PALETTE : BG_PALETTE_SUB, colorTable.data(), colorTable.size() * 2);
+	tonccpy(bgPalette, gifColorTable.data(), gifColorTable.size() * 2);
+	tonccpy(bgPalette, gifColorTable.data(), gifColorTable.size() * 2);
+	if (colorTable) {
+		for (unsigned int i = 0; i < gifColorTable.size(); i++) {
+			bgPalette[i] = colorTable[bgPalette[i]];
+		}
+		header.bgColor = colorTable[header.bgColor];
+	}
 
 	// Disposal method 2 = fill with bg color
 	if (frame.gce.disposalMethod == 2)
 		toncset(_top ? BG_GFX : BG_GFX_SUB, header.bgColor, 256 * 192);
 
-	if(_compressed) { // Was left compressed to be able to fit
+	if (_compressed) { // Was left compressed to be able to fit
 		int x = 0, y = 0;
 		u8 *dst = (u8*)(_top ? BG_GFX : BG_GFX_SUB) + (frame.descriptor.y + y + (192 - header.height) / 2) * 256 + frame.descriptor.x + (256 - header.width) / 2;
 		u8 row[frame.descriptor.w];
@@ -77,10 +87,10 @@ void Gif::displayFrame(void) {
 		reader.decode(frame.image.imageData.begin(), frame.image.imageData.end());
 	} else { // Already decompressed, just copy
 		auto it = frame.image.imageData.begin();
-		for(int y = 0; y < frame.descriptor.h; y++) {
+		for (int y = 0; y < frame.descriptor.h; y++) {
 			u8 *dst = (u8*)(_top ? BG_GFX : BG_GFX_SUB) + (frame.descriptor.y + y + (192 - header.height) / 2) * 256 + frame.descriptor.x + (256 - header.width) / 2;
 			u8 row[frame.descriptor.w];
-			for(int x = 0; x < frame.descriptor.w; x++, it++) {
+			for (int x = 0; x < frame.descriptor.w; x++, it++) {
 				if (!frame.gce.transparentColorFlag || *it != frame.gce.transparentColor)
 					row[x] = *it;
 				else
@@ -98,7 +108,7 @@ bool Gif::load(const char *path, bool top, bool animate, bool forceDecompress) {
 	if (!file)
 		return false;
 
-	if(forceDecompress) {
+	if (forceDecompress) {
 		_compressed = false;
 	} else {
 		fseek(file, 0, SEEK_END);
@@ -139,7 +149,7 @@ bool Gif::load(const char *path, bool top, bool animate, bool forceDecompress) {
 					case 0xF9: { // Graphics Control
 						frame.hasGCE = true;
 						fread(&frame.gce, 1, fgetc(file), file);
-						if(frame.gce.delay < 2) // If delay is less then 2, change it to 10
+						if (frame.gce.delay < 2) // If delay is less then 2, change it to 10
 							frame.gce.delay = 10;
 						fgetc(file); // Terminator
 						break;
@@ -164,7 +174,7 @@ bool Gif::load(const char *path, bool top, bool animate, bool forceDecompress) {
 							if (strcmp(buffer, "NETSCAPE2.0") == 0) { // Check for Netscape loop count
 								fseek(file, 2, SEEK_CUR);
 								fread(&_loopCount, 1, sizeof(_loopCount), file);
-								if(_loopCount == 0) // If loop count 0 is specified, loop forever
+								if (_loopCount == 0) // If loop count 0 is specified, loop forever
 									_loopCount = 0xFFFF;
 								fgetc(file); //terminator
 								break;
@@ -187,11 +197,12 @@ bool Gif::load(const char *path, bool top, bool animate, bool forceDecompress) {
 					frame.lct = std::vector<u16>(numColors);
 					for (int i = 0; i < numColors; i++) {
 						frame.lct[i] = fgetc(file) >> 3 | (fgetc(file) >> 3) << 5 | (fgetc(file) >> 3) << 10 | BIT(15);
+						_gct[i] = frame.lct[i];
 					}
 				}
 
 				frame.image.lzwMinimumCodeSize = fgetc(file);
-				if(_compressed) { // Leave compressed to fit more in RAM
+				if (_compressed) { // Leave compressed to fit more in RAM
 					while (u8 size = fgetc(file)) {
 						size_t end = frame.image.imageData.size();
 						frame.image.imageData.resize(end + size);
@@ -228,7 +239,7 @@ bool Gif::load(const char *path, bool top, bool animate, bool forceDecompress) {
 	_paused = false;
 	_finished = loopForever();
 	_frames.shrink_to_fit();
-	if(animate)
+	if (animate)
 		_animating.push_back(this);
 
 	return true;

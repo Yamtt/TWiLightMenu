@@ -252,7 +252,7 @@ typedef enum {
 	N3DS_LANG_CHINESE_TRADITIONAL	= 11,
 } sNDSLanguage;
 
-bool checkDsiBinaries(FILE* ndsFile);
+bool checkDsiBinaries(const char* filename, const int num);
 
 /**
  * Get SDK version from an NDS file.
@@ -264,11 +264,10 @@ u32 getSDKVersion(FILE* ndsFile);
 
 /**
  * Check if NDS game has AP.
- * @param ndsFile NDS file.
  * @param filename NDS ROM filename.
- * @return 1 or 2 on success; 0 if no AP.
+ * @return true on success; false if no AP.
  */
-int checkRomAP(FILE *ndsFile, int num);
+bool checkRomAP(const char* filename, const int num);
 
 extern char gameTid[40][5];
 extern u8 romVersion[40];
@@ -279,11 +278,15 @@ extern u32 a7mbk6[40];
 extern sNDSBannerExt bnriconTile[41];
 
 // bnriconframenum[]
+extern int bnriconPalLoaded[41];
 extern int bnriconPalLine[41];
 extern int bnriconframenumY[41];
 extern int bannerFlip[41];
 
 // bnriconisDSi[]
+extern bool isValid[40];
+extern bool isTwlm[40];
+extern bool isUnlaunch[40];
 extern bool isDirectory[40];
 extern bool bnrSysSettings[41];
 extern int bnrRomType[41];
@@ -294,6 +297,8 @@ extern bool isHomebrew[41];
 extern bool isModernHomebrew[41];		// false == No DSi-Extended header, true == Has DSi-Extended header
 extern bool requiresRamDisk[41];
 extern int requiresDonorRom[41];
+extern int customIcon[41];
+extern char customIconPath[256];
 
 /**
  * Get banner sequence from banner file.
@@ -310,6 +315,6 @@ void clearBannerSequence(int iconnum);
  * Play banner sequence.
  * @param binFile Banner file.
  */
-void playBannerSequence(int iconnum);
+bool playBannerSequence(int iconnum);
 
 #endif // NDS_HEADER2

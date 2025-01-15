@@ -8,6 +8,8 @@ endif
 
 include $(DEVKITARM)/ds_rules
 
+CURRENT_SCREEN_MODE := 2
+
 #---------------------------------------------------------------------------------
 # TARGET is the name of the output
 # BUILD is the directory where object files & intermediate files will be placed
@@ -17,10 +19,11 @@ include $(DEVKITARM)/ds_rules
 # GRAPHICS is a list of directories containing image files to be converted with grit
 # MAXMOD_SOUNDBANK contains a directory of music and sound effect files
 #---------------------------------------------------------------------------------
+UNIVERSAL	:=	../../universal
 TARGET		:=	mainmenu
 BUILD		:=	build
-SOURCES		:=	source source/nand source/graphics source/tool source/common ../../universal/source ../../universal/arm9/source ../../universal/source/flashcard mbedtls ../../universal/sdmmc/arm9/source
-INCLUDES	:=	include source ../../universal/include ../../universal/arm9/include ../../universal/sdmmc/arm9/include
+SOURCES		:=	source source/nand source/graphics source/tool source/common mbedtls $(UNIVERSAL)/source $(UNIVERSAL)/source/common $(UNIVERSAL)/source/nds_loader $(UNIVERSAL)/source/tonccpy $(UNIVERSAL)/arm9/source $(UNIVERSAL)/source/flashcard $(UNIVERSAL)/source/lodepng $(UNIVERSAL)/sdmmc/arm9/source
+INCLUDES	:=	include source $(UNIVERSAL)/include $(UNIVERSAL)/arm9/include $(UNIVERSAL)/sdmmc/arm9/include
 DATA		:=	../data  
 GRAPHICS	:=  ../gfx
 MUSIC       :=  ../music
@@ -30,16 +33,16 @@ MUSIC       :=  ../music
 #---------------------------------------------------------------------------------
 ARCH	:=	-mthumb -mthumb-interwork
 
-CFLAGS	:=	-g -Wall -O2\
+CFLAGS	:=	-g -Wall -O2 \
  		-march=armv5te -mtune=arm946e-s -fomit-frame-pointer\
 		-ffast-math \
 		$(ARCH)
 
-CFLAGS	+=	$(INCLUDE) -DARM9
+CFLAGS	+=	$(INCLUDE) -DARM9 -DSTANDALONE -DCURRENT_SCREEN_MODE=$(CURRENT_SCREEN_MODE)
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++17
 
-ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=../../../universal/arm9/ds_arm9_twlm.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+ASFLAGS	:=	-g $(ARCH) $(INCLUDE)
+LDFLAGS	=	-specs=../$(UNIVERSAL)/arm9/ds_arm9_twlm.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project (order is important)
@@ -52,7 +55,7 @@ LIBS	:= 	-lfat -lmm9 -lnds9
 # include and lib
 #---------------------------------------------------------------------------------
 LIBDIRS	:=	$(CURDIR) ../ $(LIBNDS)
- 
+
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional
 # rules for different file extensions
@@ -76,7 +79,7 @@ BMPFILES	:=	$(foreach dir,$(GRAPHICS),$(notdir $(wildcard $(dir)/*.bmp)))
 PNGFILES	:=	$(foreach dir,$(GRAPHICS),$(notdir $(wildcard $(dir)/*.png)))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*))) soundbank.bin
- 
+
 #---------------------------------------------------------------------------------
 # use CXX for linking C++ projects, CC for standard C
 #---------------------------------------------------------------------------------
@@ -95,20 +98,20 @@ export OFILES	:=	$(addsuffix .o,$(BINFILES)) \
 					$(BMPFILES:.bmp=.o) \
 					$(PNGFILES:.png=.o) \
 					$(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
- 
+
 export INCLUDE	:=	$(foreach dir,$(INCLUDES),-iquote $(CURDIR)/$(dir)) \
 					$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
 					-I$(CURDIR)/$(BUILD)
- 
+
 export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
 
 export OUTPUT	:=	$(CURDIR)/$(TARGET)
- 
+
 .PHONY: $(BUILD) clean
 
 all : $(BUILD)
-	
+
 #---------------------------------------------------------------------------------
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
@@ -120,14 +123,14 @@ clean:
 
 #---------------------------------------------------------------------------------
 else
- 
+
 DEPENDS	:=	$(OFILES:.o=.d)
 
 #---------------------------------------------------------------------------------
 # main targets
 #---------------------------------------------------------------------------------
 $(OUTPUT).elf	:	$(OFILES)
- 
+
 #---------------------------------------------------------------------------------
 # rule to build soundbank from music files
 #---------------------------------------------------------------------------------
@@ -158,7 +161,7 @@ soundbank.bin : $(AUDIOFILES)
 	grit $< -fts -o$*
 
 -include $(DEPSDIR)/*.d
- 
+
 #---------------------------------------------------------------------------------------
 endif
 #---------------------------------------------------------------------------------------

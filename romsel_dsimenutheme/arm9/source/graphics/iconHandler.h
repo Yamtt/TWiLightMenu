@@ -2,19 +2,6 @@
 
 #pragma once
 
-#define GBA_ICON 0xBA
-#define GBC_ICON 0xBC
-#define NES_ICON 0xE5
-#define SMS_ICON 0xE6
-#define GG_ICON 0xE7
-#define MD_ICON 0xDD
-#define SNES_ICON 0xE2
-#define MSX_ICON 0xEE
-#define COL_ICON 0xC0
-#define PLG_ICON 0xD2
-#define A26_ICON 0xA2
-#define INT_ICON 0x1E
-#define PCE_ICON 0xCE
 #define NDS_ICON_BANK_COUNT 7
 #define TWL_ICON_FRAMES 8
 #define TWL_TEX_HEIGHT 256
@@ -51,6 +38,14 @@ void iconManagerInit();
  * texHeight must be a power of two, or bad things will happen.
  */
 void glLoadIcon(int num, const u16 *palette, const u8 *tiles, int texHeight = 32);
+
+/**
+ * Loads an icon's palette into one of 6 existing banks,
+ * overwritting the previous data.
+ * num must be in the range [0, 5] else this function
+ * does nothing.
+ */
+void glLoadPalette(int num, const u16 *palette);
 
 
 /**
