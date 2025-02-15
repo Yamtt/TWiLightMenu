@@ -275,18 +275,22 @@ u32 getSDKVersion(FILE* ndsFile);
  * @param filename NDS ROM filename.
  * @return 1 or 2 on success; 0 if no AP.
  */
-int checkRomAP(FILE *ndsFile);
+int checkRomAP(FILE *ndsFile, const char* filename);
 
 // bnriconframenum[]
+extern int bnriconPalLoaded;
 extern int bnriconPalLine;
 extern int bnriconframenumY;
 extern int bannerFlip;
 
 // bnriconisDSi[]
+extern bool isValid;
+extern bool isTwlm;
 extern bool isDirectory;
 extern int bnrRomType;
 extern bool bnriconisDSi;
 extern int bnrWirelessIcon;	// 0 = None, 1 = Local, 2 = WiFi
+extern char gameTid[5];
 extern u8 romVersion;
 extern u8 romUnitCode;
 extern u32 a7mbk6;
@@ -295,6 +299,8 @@ extern bool isHomebrew;
 extern bool isModernHomebrew;		// false == No DSi-Extended header, true == Has DSi-Extended header
 extern bool requiresRamDisk;
 extern int requiresDonorRom;
+extern int customIcon;				// 0 = None, 1 = png, 2 = banner.bin, -1 = error
+extern char customIconPath[256];
 
 /**
  * Get banner sequence from banner file.
@@ -311,6 +317,6 @@ void clearBannerSequence();
  * Play banner sequence.
  * @param binFile Banner file.
  */
-void playBannerSequence();
+bool playBannerSequence();
 
 #endif // NDS_HEADER2

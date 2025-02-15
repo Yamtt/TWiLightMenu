@@ -93,7 +93,7 @@ static void initKey1Encryption (u8* cmdData, int iCardDevice) {
 	key1data.mmm = getRandomNumber() & 0x00000fff;
 	key1data.nnn = getRandomNumber() & 0x00000fff;
 
-    if(iCardDevice) //DSi
+    if (iCardDevice) //DSi
       cmdData[7]=0x3D;	// CARD_CMD_ACTIVATE_BF2
     else
       cmdData[7]=CARD_CMD_ACTIVATE_BF;
@@ -167,9 +167,9 @@ static void switchToTwlBlowfish(void) {
 	if (isDSiMode()) { 
 		// Reset card slot
 		disableSlot1();
-		for(int i = 0; i < 25; i++) { swiWaitForVBlank(); }
+		for (int i = 0; i < 25; i++) { swiWaitForVBlank(); }
 		enableSlot1();
-		for(int i = 0; i < 15; i++) { swiWaitForVBlank(); }
+		for (int i = 0; i < 15; i++) { swiWaitForVBlank(); }
 
 		// Dummy command sent after card reset
 		cardParamCommand (CARD_CMD_DUMMY, 0,
@@ -179,12 +179,12 @@ static void switchToTwlBlowfish(void) {
 		REG_ROMCTRL=0;
 		REG_AUXSPICNT=0;
 		//ioDelay2(167550);
-		for(i = 0; i < 25; i++) { swiWaitForVBlank(); }
+		for (i = 0; i < 25; i++) { swiWaitForVBlank(); }
 		REG_AUXSPICNT=CARD_CR1_ENABLE|CARD_CR1_IRQ;
 		REG_ROMCTRL=CARD_nRESET|CARD_SEC_SEED;
-		while(REG_ROMCTRL&CARD_BUSY) ;
+		while (REG_ROMCTRL&CARD_BUSY) ;
 		cardReset();
-		while(REG_ROMCTRL&CARD_BUSY) ;
+		while (REG_ROMCTRL&CARD_BUSY) ;
 	}
 
 	//int iCardDevice = 1;
@@ -274,24 +274,18 @@ static void switchToTwlBlowfish(void) {
 }
 
 
-int cardInit (bool properReset)
+void my_cardReset (bool properReset)
 {
-	u32 portFlagsKey1, portFlagsSecRead;
-	normalChip = false;	// As defined by GBAtek, normal chip secure area is accessed in blocks of 0x200, other chip in blocks of 0x1000
-	int secureBlockNumber;
 	int i;
-	u8 cmdData[8] __attribute__ ((aligned));
-	GameCode* gameCode;
-
-	twlBlowfish = false;
 
 	sysSetCardOwner (BUS_OWNER_ARM9);	// Allow arm9 to access NDS cart
+
 	if (isDSiMode()) { 
 		// Reset card slot
 		disableSlot1();
-		for(i = 0; i < 25; i++) { swiWaitForVBlank(); }
+		for (i = 0; i < 25; i++) { swiWaitForVBlank(); }
 		enableSlot1();
-		for(i = 0; i < 15; i++) { swiWaitForVBlank(); }
+		for (i = 0; i < 15; i++) { swiWaitForVBlank(); }
 
 		if (!properReset) {
 			// Dummy command sent after card reset
@@ -304,18 +298,32 @@ int cardInit (bool properReset)
 		REG_ROMCTRL=0;
 		REG_AUXSPICNT=0;
 		//ioDelay2(167550);
-		for(i = 0; i < 25; i++) { swiWaitForVBlank(); }
+		for (i = 0; i < 25; i++) { swiWaitForVBlank(); }
 		REG_AUXSPICNT=CARD_CR1_ENABLE|CARD_CR1_IRQ;
 		REG_ROMCTRL=CARD_nRESET|CARD_SEC_SEED;
-		while(REG_ROMCTRL&CARD_BUSY) ;
+		while (REG_ROMCTRL&CARD_BUSY) ;
 		cardReset();
-		while(REG_ROMCTRL&CARD_BUSY) ;
+		while (REG_ROMCTRL&CARD_BUSY) ;
 	}
 
 	toncset(headerData, 0, 0x1000);
+}
+
+int cardInit (void)
+{
+	u32 portFlagsKey1, portFlagsSecRead;
+	normalChip = false;	// As defined by GBAtek, normal chip secure area is accessed in blocks of 0x200, other chip in blocks of 0x1000
+	int secureBlockNumber;
+	int i;
+	u8 cmdData[8] __attribute__ ((aligned));
+	GameCode* gameCode;
+
+	twlBlowfish = false;
+
+	sysSetCardOwner (BUS_OWNER_ARM9);	// Allow arm9 to access NDS cart
 
 	u32 iCardId=cardReadID(CARD_CLK_SLOW);	
-	while(REG_ROMCTRL & CARD_BUSY);
+	while (REG_ROMCTRL & CARD_BUSY);
 	//u32 iCheapCard=iCardId&0x80000000;
 
 	// Read the header
@@ -325,15 +333,13 @@ int cardInit (bool properReset)
 
 	tonccpy(&ndsCardHeader, headerData, sizeof(sNDSHeaderExt));
 
-	if ((ndsCardHeader.unitCode != 0) || (ndsCardHeader.dsi_flags != 0))
-	{
+	if ((ndsCardHeader.unitCode != 0) || (ndsCardHeader.dsi_flags != 0)) {
 		// Extended header found
 		cardParamCommand (CARD_CMD_HEADER_READ, 0,
 			CARD_ACTIVATE | CARD_nRESET | CARD_CLK_SLOW | CARD_BLK_SIZE(4) | CARD_DELAY1(0x1FFF) | CARD_DELAY2(0x3F),
 			(void*)headerData, 0x1000/sizeof(u32));
 		if (ndsCardHeader.dsi1[0]==0xFFFFFFFF && ndsCardHeader.dsi1[1]==0xFFFFFFFF
-		 && ndsCardHeader.dsi1[2]==0xFFFFFFFF && ndsCardHeader.dsi1[3]==0xFFFFFFFF)
-		{
+		 && ndsCardHeader.dsi1[2]==0xFFFFFFFF && ndsCardHeader.dsi1[3]==0xFFFFFFFF) {
 			toncset((u8*)headerData+0x200, 0, 0xE00);	// Clear out FFs
 		}
 		tonccpy(&ndsCardHeader, headerData, sizeof(sNDSHeaderExt));
@@ -434,7 +440,7 @@ int cardInit (bool properReset)
 	cardPolledTransfer(portFlagsKey1, NULL, 0, cmdData);
 
     //CycloDS doesn't like the dsi secure area being decrypted
-    if((ndsCardHeader.arm9romOffset != 0x4000) || secureArea[0] || secureArea[1])
+    if ((ndsCardHeader.arm9romOffset != 0x4000) || secureArea[0] || secureArea[1])
     {
 		decryptSecureArea (gameCode->key, secureArea, 0);
 	}

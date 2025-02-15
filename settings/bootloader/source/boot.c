@@ -47,15 +47,14 @@ Helpful information:
 #undef ARM9
 #define ARM7
 #include <nds/arm7/audio.h>
-#include "tonccpy.h"
+#include "dmaTwl.h"
+#include "common/tonccpy.h"
 #include "sdmmc.h"
 #include "i2c.h"
 #include "fat.h"
 #include "dldi_patcher.h"
 #include "card.h"
 #include "boot.h"
-
-void arm7clearRAM();
 
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 // Important things
@@ -134,7 +133,7 @@ void passArgs_ARM7 (void) {
 
 	if (!argStart || !argSize) return;
 
-	if ( ARM9_DST == 0 && ARM9_LEN == 0) {
+	if (ARM9_DST == 0 && ARM9_LEN == 0) {
 		ARM9_DST = *((u32*)(NDS_HEAD + 0x038));
 		ARM9_LEN = *((u32*)(NDS_HEAD + 0x03C));
 	}
@@ -144,14 +143,11 @@ void passArgs_ARM7 (void) {
 	argDst = (u32*)((ARM9_DST + ARM9_LEN + 3) & ~3);		// Word aligned
 
 	if (ARM9_LEN > 0x380000) {
-		argDst = (u32*)0x02FFA000;
-	} else
-	if (dsiMode && (*(u8*)(NDS_HEAD + 0x012) & BIT(1)))
-	{
+		argDst = (u32*)(TEMP_MEM - ((argSize/4)*4));
+	} else if (dsiMode && (*(u8*)(NDS_HEAD + 0x012) & BIT(1))) {
 		u32 ARM9i_DST = *((u32*)(TWL_HEAD + 0x1C8));
 		u32 ARM9i_LEN = *((u32*)(TWL_HEAD + 0x1CC));
-		if (ARM9i_LEN)
-		{
+		if (ARM9i_LEN) {
 			u32* argDst2 = (u32*)((ARM9i_DST + ARM9i_LEN + 3) & ~3);		// Word aligned
 			if (argDst2 > argDst)
 				argDst = argDst2;
@@ -168,6 +164,28 @@ void passArgs_ARM7 (void) {
 
 
 
+static void initMBK_dsiMode(void) {
+	// This function has no effect with ARM7 SCFG locked
+	*(vu32*)REG_MBK1 = *(u32*)0x02FFE180;
+	*(vu32*)REG_MBK2 = *(u32*)0x02FFE184;
+	*(vu32*)REG_MBK3 = *(u32*)0x02FFE188;
+	*(vu32*)REG_MBK4 = *(u32*)0x02FFE18C;
+	*(vu32*)REG_MBK5 = *(u32*)0x02FFE190;
+	REG_MBK6 = *(u32*)0x02FFE1A0;
+	REG_MBK7 = *(u32*)0x02FFE1A4;
+	REG_MBK8 = *(u32*)0x02FFE1A8;
+	REG_MBK9 = *(u32*)0x02FFE1AC;
+}
+
+void memset_addrs_arm7(u32 start, u32 end)
+{
+	if (!dsiMode && !(REG_SCFG_EXT & BIT(16))) {
+		toncset((u32*)start, 0, ((int)end - (int)start));
+		return;
+	}
+	dma_twlFill32(0, 0, (u32*)start, ((int)end - (int)start));
+}
+
 /*-------------------------------------------------------------------------
 resetMemory_ARM7
 Clears all of the NDS's RAM that is visible to the ARM7
@@ -177,7 +195,7 @@ Modified by Chishm:
 --------------------------------------------------------------------------*/
 void resetMemory_ARM7 (void)
 {
-	int i;
+	int i, reg;
 	u8 settings1, settings2;
 	u32 settingsOffset = 0;
 
@@ -191,6 +209,13 @@ void resetMemory_ARM7 (void)
 	}
 
 	REG_SOUNDCNT = 0;
+	REG_SNDCAP0CNT = 0;
+	REG_SNDCAP1CNT = 0;
+
+	REG_SNDCAP0DAD = 0;
+	REG_SNDCAP0LEN = 0;
+	REG_SNDCAP1DAD = 0;
+	REG_SNDCAP1LEN = 0;
 
 	//clear out ARM7 DMA channels and timers
 	for (i=0; i<4; i++) {
@@ -199,6 +224,7 @@ void resetMemory_ARM7 (void)
 		DMA_DEST(i) = 0;
 		TIMER_CR(i) = 0;
 		TIMER_DATA(i) = 0;
+		for (reg=0; reg<0x1c; reg+=4)*((vu32*)(0x04004104 + ((i*0x1c)+reg))) = 0;//Reset NDMA.
 	}
 
 	// Clear out FIFO
@@ -206,19 +232,21 @@ void resetMemory_ARM7 (void)
 	REG_IPC_FIFO_CR = IPC_FIFO_ENABLE | IPC_FIFO_SEND_CLEAR;
 	REG_IPC_FIFO_CR = 0;
 
-	arm7clearRAM();
+	memset_addrs_arm7(0x03800000 - 0x8000, 0x03800000 + (dsiMode ? 0xC000 : 0x10000)); // clear exclusive IWRAM
 	// clear most of EWRAM - except after RAM end - 0xc000, which has the bootstub
 	if (dsiMode && loadFromRam) {
-		toncset((void*)0x02004000, 0, 0x7FC000);
-		toncset((void*)0x02D00000, 0, 0x2F4000);
+		memset_addrs_arm7(0x02004000, 0x02800000);
+		memset_addrs_arm7(0x02D00000, 0x02FF4000);
 	} else {
-		toncset((void*)0x02004000, 0, dsiMode ? 0xFF0000 : 0x3F0000);
+		memset_addrs_arm7(0x02004000, dsiMode ? 0x02FF4000 : 0x023F4000);
 	}
 
 	REG_IE = 0;
 	REG_IF = ~0;
-	(*(vu32*)(0x04000000-4)) = 0;  //IRQ_HANDLER ARM7 version
-	(*(vu32*)(0x04000000-8)) = ~0; //VBLANK_INTR_WAIT_FLAGS, ARM7 version
+	REG_AUXIE = 0;
+	REG_AUXIF = ~0;
+	*(vu32*)0x0380FFFC = 0;  // IRQ_HANDLER ARM7 version
+	*(vu32*)0x0380FFF8 = 0; // VBLANK_INTR_WAIT_FLAGS, ARM7 version
 	REG_POWERCNT = 1;  //turn off power to stuff
 
 	// Get settings location
@@ -237,7 +265,7 @@ void resetMemory_ARM7 (void)
 
 	((vu32*)0x040044f0)[2] = 0x202DDD1D;
 	((vu32*)0x040044f0)[3] = 0xE1A00005;
-	while((*(vu32*)0x04004400) & 0x2000000);
+	while ((*(vu32*)0x04004400) & 0x2000000);
 
 }
 
@@ -247,8 +275,6 @@ u32 ROM_TID;
 void loadBinary_ARM7 (u32 fileCluster)
 {
 	if (loadFromRam) {
-		bool isDSi = (*(vu32*)(0x08240000) != 1);
-
 		//u32 ARM9_SRC = *(u32*)(TWL_HEAD+0x20);
 		char* ARM9_DST = (char*)*(u32*)(TWL_HEAD+0x28);
 		u32 ARM9_LEN = *(u32*)(TWL_HEAD+0x2C);
@@ -258,8 +284,8 @@ void loadBinary_ARM7 (u32 fileCluster)
 
 		ROM_TID = *(u32*)(TWL_HEAD+0xC);
 
-		tonccpy(ARM9_DST, (char*)(isDSi ? 0x02800000 : 0x09000000), ARM9_LEN);
-		tonccpy(ARM7_DST, (char*)(isDSi ? 0x02B80000 : 0x09380000), ARM7_LEN);
+		tonccpy(ARM9_DST, (char*)0x02800000, ARM9_LEN);
+		tonccpy(ARM7_DST, (char*)0x02B80000, ARM7_LEN);
 
 		// first copy the header to its proper location, excluding
 		// the ARM9 start address, so as not to start it
@@ -268,8 +294,7 @@ void loadBinary_ARM7 (u32 fileCluster)
 		dmaCopyWords(3, (void*)TWL_HEAD, (void*)NDS_HEAD, 0x170);
 		*(u32*)(TWL_HEAD+0x24) = TEMP_ARM9_START_ADDRESS;
 
-		if (!dsMode && dsiMode && (*(u8*)(TWL_HEAD+0x12) > 0))
-		{
+		if (!dsMode && dsiMode && (*(u8*)(TWL_HEAD+0x12) > 0)) {
 			//char* ARM9i_SRC = (char*)*(u32*)(TWL_HEAD+0x1C0);
 			char* ARM9i_DST = (char*)*(u32*)(TWL_HEAD+0x1C8);
 			u32 ARM9i_LEN = *(u32*)(TWL_HEAD+0x1CC);
@@ -281,10 +306,11 @@ void loadBinary_ARM7 (u32 fileCluster)
 				tonccpy(ARM9i_DST, (char*)0x02C00000, ARM9i_LEN);
 			if (ARM7i_LEN)
 				tonccpy(ARM7i_DST, (char*)0x02C80000, ARM7i_LEN);
+
+			initMBK_dsiMode();
 		}
 
-		if (isDSi)
-			toncset((void*)0x02800000, 0, 0x500000);
+		toncset((void*)0x02800000, 0, 0x500000);
 
 		return;
 	}
@@ -314,8 +340,7 @@ void loadBinary_ARM7 (u32 fileCluster)
 	ndsHeader[0x024>>2] = 0;
 	dmaCopyWords(3, (void*)ndsHeader, (void*)NDS_HEAD, 0x170);
 
-	if (!dsMode && dsiMode && (ndsHeader[0x10>>2]&BIT(16+1)))
-	{
+	if (!dsMode && dsiMode && (ndsHeader[0x10>>2]&BIT(16+1))) {
 		// Read full TWL header
 		fileRead((char*)TWL_HEAD, fileCluster, 0, 0x1000);
 
@@ -330,6 +355,8 @@ void loadBinary_ARM7 (u32 fileCluster)
 			fileRead(ARM9i_DST, fileCluster, ARM9i_SRC, ARM9i_LEN);
 		if (ARM7i_LEN)
 			fileRead(ARM7i_DST, fileCluster, ARM7i_SRC, ARM7i_LEN);
+
+		initMBK_dsiMode();
 	}
 }
 
@@ -342,8 +369,8 @@ Modified by Chishm:
 --------------------------------------------------------------------------*/
 void startBinary_ARM7 (void) {
 	REG_IME=0;
-	while(REG_VCOUNT!=191);
-	while(REG_VCOUNT==191);
+	while (REG_VCOUNT!=191);
+	while (REG_VCOUNT==191);
 	// copy NDS ARM9 start address into the header, starting ARM9
 	*((vu32*)0x02FFFE24) = TEMP_ARM9_START_ADDRESS;
 	ARM9_START_FLAG = 1;
@@ -420,6 +447,25 @@ int main (void) {
 #ifndef NO_SDMMC
 	sdRead = (dsiSD && dsiMode);
 #endif
+	if (wantToPatchDLDI) {
+		toncset((u32*)0x06000000, 0, 0x8000);
+		if (*(u32*)0x02FF4184 == 0x69684320) { // DLDI ' Chi' string in bootstub space + bootloader in DLDI driver space
+			const u16 dldiFileSize = 1 << *(u8*)0x02FF418D;
+			tonccpy((u32*)0x06000000, (u32*)0x02FF4180, dldiFileSize);
+			dldiRelocateBinary();
+
+			toncset((u32*)0x02FF4000, 0, 0x8180); // Clear bootstub + DLDI driver
+		} else if (*(u32*)0x02FF8004 == 0x69684320) { // DLDI ' Chi' string
+			const u16 dldiFileSize = 1 << *(u8*)0x02FF800D;
+			tonccpy((u32*)0x06000000, (u32*)0x02FF8000, (dldiFileSize > 0x4000) ? 0x4000 : dldiFileSize);
+			dldiClearBss();
+		} else if (*(u32*)0x02FF8000 == 0x53535A4C) { // LZ77 flag
+			dldiDecompressBinary();
+		} else {
+			return -1;
+		}
+	}
+
 	if (*(u32*)(0x2FFFD0C) == 0x4E44544C) {
 		limitedModeMemoryPit();
 		*(u32*)(0x2FFFD0C) = 0;
@@ -435,16 +481,14 @@ int main (void) {
 	u32 fileCluster = storedFileCluster;
 	if (!loadFromRam) {
 		// Init card
-		if(!FAT_InitFiles(initDisc))
-		{
+		if (!FAT_InitFiles(initDisc)) {
 			return -1;
 		}
 		if ((fileCluster < CLUSTER_FIRST) || (fileCluster >= CLUSTER_EOF)) 	/* Invalid file cluster specified */
 		{
 			fileCluster = getBootFileCluster(bootName);
 		}
-		if (fileCluster == CLUSTER_FREE)
-		{
+		if (fileCluster == CLUSTER_FREE) {
 			return -1;
 		}
 	}

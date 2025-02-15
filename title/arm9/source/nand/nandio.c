@@ -18,7 +18,7 @@ static bool is3DS;
 
 extern bool nand_Startup();
 
-static u8* crypt_buf = 0;
+static u8 crypt_buf[SECTOR_SIZE * CRYPT_BUF_LEN] ALIGN(32);
 
 static u32 fat_sig_fix_offset = 0;
 
@@ -40,7 +40,7 @@ void getConsoleID(u8 *consoleID){
 
 	F_XY_reverse((uint32_t*)key, (uint32_t*)key_xy); //work backwards from the normalkey to get key_x that has the consoleID
 
-	for(int i=0;i<16;i++){
+	for (int i=0;i<16;i++){
 		key_x[i] = key_xy[i] ^ key_y[i];             //''
 	}
 
@@ -58,8 +58,8 @@ bool my_nand_ReadSectors(sec_t sector, sec_t numSectors,void* buffer) {
 	sharedAddr[2] = (vu32)buffer;
 	
 	sharedAddr[3] = 0x4452414E;
-	IPC_SendSync(8);
-	while(sharedAddr[3] == 0x4452414E) {
+	IPC_SendSync(6);
+	while (sharedAddr[3] == 0x4452414E) {
 		swiDelay(100);
 	}
 
@@ -72,17 +72,17 @@ bool nandio_startup() {
 	int result = 0;
 
 	sharedAddr[3] = 0x56484453;
-	IPC_SendSync(8);
-	while(sharedAddr[3] == 0x56484453) {
+	IPC_SendSync(0);
+	while (sharedAddr[3] == 0x56484453) {
 		swiDelay(100);
 	}
 	result = sharedAddr[3];
 
-	if(result==0) return false;
+	if (result==0) return false;
 
 	sharedAddr[3] = 0x5453414E;
-	IPC_SendSync(8);
-	while(sharedAddr[3] == 0x5453414E) {
+	IPC_SendSync(2);
+	while (sharedAddr[3] == 0x5453414E) {
 		swiDelay(100);
 	}
 
@@ -96,8 +96,10 @@ bool nandio_startup() {
 
 	if (*(u32*)(0x2FFD7BC) == 0) {
 		// Get eMMC CID
-		*(u32*)(0x2FFFD0C) = 0x454D4D43;
-		while (*(u32*)(0x2FFFD0C) != 0);
+		*(u32*)(0xCFFFD0C) = 0x454D4D43;
+		while (*(u32*)(0xCFFFD0C) != 0) {
+			swiDelay(100);
+		}
 	}
 
 	u8 consoleID[8];
@@ -117,13 +119,7 @@ bool nandio_startup() {
 	mbr_t *mbr = (mbr_t*)sector_buf;
 	nandio_set_fat_sig_fix(is3DS ? 0 : mbr->partitions[0].offset);
 
-	if (crypt_buf == 0) {
-		crypt_buf = (u8*)memalign(32, SECTOR_SIZE * CRYPT_BUF_LEN);
-		//if (crypt_buf == 0) {
-			//printf("nandio: failed to alloc buffer\n");
-		//}
-	}
-	return crypt_buf != 0;
+	return true;
 }
 
 bool nandio_is_inserted() {
@@ -138,8 +134,7 @@ static bool read_sectors(sec_t start, sec_t len, void *buffer) {
 			start == fat_sig_fix_offset
 			&& ((u8*)buffer)[0x36] == 0
 			&& ((u8*)buffer)[0x37] == 0
-			&& ((u8*)buffer)[0x38] == 0)
-		{
+			&& ((u8*)buffer)[0x38] == 0) {
 			((u8*)buffer)[0x36] = 'F';
 			((u8*)buffer)[0x37] = 'A';
 			((u8*)buffer)[0x38] = 'T';
@@ -178,8 +173,6 @@ bool nandio_clear_status() {
 }
 
 bool nandio_shutdown() {
-	free(crypt_buf);
-	crypt_buf = 0;
 	return true;
 }
 

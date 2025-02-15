@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <string>
 
-#include "common/dsimenusettings.h"
+#include "common/twlmenusettings.h"
 #include "common/inifile.h"
 
 #define STRING(what,def) std::string STR_##what;
@@ -20,8 +20,8 @@ std::string getString(CIniFile &ini, const std::string &item, const std::string 
 	std::string out = ini.GetString("LANGUAGE", item, defaultValue);
 
 	// Convert "\n" to actual newlines
-	for(uint i = 0; i < out.length() - 1; i++) {
-		if(out[i] == '\\') {
+	for (uint i = 0; i < out.length() - 1; i++) {
+		if (out[i] == '\\') {
 			switch(out[i + 1]) {
 				case 'n':
 				case 'N':
@@ -85,10 +85,10 @@ std::string getString(CIniFile &ini, const std::string &item, const std::string 
 				default:
 					break;
 			}
-		} else if(out[i] == '&') {
-			if(out.substr(i + 1, 3) == "lrm") {
+		} else if (out[i] == '&') {
+			if (out.substr(i + 1, 3) == "lrm") {
 				out = out.substr(0, i) + "\u200E" + out.substr(i + 4); // Left-to-Right mark
-			} else if(out.substr(i + 1, 3) == "rlm") {
+			} else if (out.substr(i + 1, 3) == "rlm") {
 				out = out.substr(0, i) + "\u200F" + out.substr(i + 4); // Right-to-Left mark
 			}
 		}

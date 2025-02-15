@@ -20,6 +20,7 @@
 
 #include "graphics.h"
 #include <ctime>
+#include <cmath>
 #include <dirent.h>
 #include <maxmod9.h>
 #include <nds/arm9/dldi.h>
@@ -28,33 +29,36 @@
 #include "../iconTitle.h"
 #include "../language.h"
 #include "../ndsheaderbanner.h"
-#include "common/dsimenusettings.h"
+#include "common/twlmenusettings.h"
 #include "common/flashcard.h"
 #include <gl2d.h>
 #include "common/lzss.h"
 #include "common/systemdetails.h"
+#include "common/my_rumble.h"
+#include "common/logging.h"
 #include "myDSiMode.h"
 #include "date.h"
 #include "iconHandler.h"
+#include "fileBrowse.h"
 #include "fontHandler.h"
 #include "graphics/ThemeTextures.h"
-#include "graphics/lodepng.h"
+#include "common/lodepng.h"
 #include "launchDots.h"
 #include "queueControl.h"
 #include "sound.h"
-#include "ndma.h"
+#include "startborderpal.h"
+//#include "ndma.h"
 #include "ThemeConfig.h"
 #include "themefilenames.h"
+#include "common/ColorLut.h"
 #include "tool/colortool.h"
-//#include "tool/logging.h"
-
-#include "uvcoord_date_time_font.h"
-#include "uvcoord_top_font.h"
 
 #include "bubbles.h"	// For HBL theme
 
 #define CONSOLE_SCREEN_WIDTH 32
 #define CONSOLE_SCREEN_HEIGHT 24
+
+#define colorsToCache (208*16)
 
 static glImage hblBubbles[32 * 64];
 static int hblBubblesID = 0;
@@ -65,12 +69,12 @@ static int frontBubblesYpos_def[3] = {256, 256+64, 256+32};
 static int backBubblesYpos[4] = {256, 256+56, 256+32, 256+16};
 static int frontBubblesYpos[3] = {256, 256+64, 256+32};
 
-extern u16 usernameRendered[11];
+static float initialDropSpeed = 7.0f;
 
 extern bool whiteScreen;
 extern bool fadeType;
 extern bool fadeSpeed;
-extern bool fadeColor;
+extern bool fadeSleep;
 extern bool controlTopBright;
 extern bool controlBottomBright;
 int fadeDelay = 0;
@@ -81,14 +85,12 @@ extern int colorGvalue;
 extern int colorBvalue;
 
 extern bool dropDown;
-int dropTime[5];
-int dropSeq[5];
-#define dropSpeedDefine 7
-int dropSpeed[5] = {dropSpeedDefine};
-int dropSpeedChange[5];
-int titleboxYposDropDown[5] = {-85 - 80};
-int allowedTitleboxForDropDown = 0;
-int delayForTitleboxToDropDown = 0;
+int dropDelay[5];
+int dropBounce[5];
+float dropDownY[5] = { 0.0f };
+float dropSpeed[5] = { 0.0f };
+int titleboxYposDropDown[5];
+
 extern int currentBg;
 extern bool showSTARTborder;
 extern bool needToPlayStopSound;
@@ -96,13 +98,16 @@ extern int waitForNeedToPlayStopSound;
 extern int movingApp;
 extern int movingAppYpos;
 extern bool movingAppIsDir;
+extern bool draggingIcons;
 float movingArrowYpos = 59;
 bool movingArrowYdirection = true;
 bool showMovingArrow = false;
 bool displayGameIcons = false;
+bool rumblePos = false;
 
 extern bool buttonArrowTouched[2];
 extern bool scrollWindowTouched;
+extern bool useRumble;
 
 extern bool applaunchprep;
 
@@ -127,6 +132,7 @@ int titleboxXmovespeed[8] = {12, 10, 8, 8, 8, 8, 6, 4};
 int titleboxXpos[2] = {0};
 int titleboxXdest[2] = {0};
 int titleboxYpos = 85; // 85, when dropped down
+int iconYposOnTitleBox = 12;
 int titlewindowXpos[2] = {0};
 int titlewindowXdest[2] = {0};
 int titleboxXspeed = 3; // higher is SLOWER
@@ -140,6 +146,7 @@ bool showRshoulder = false;
 bool showProgressIcon = false;
 bool showProgressBar = false;
 int progressBarLength = 0;
+extern bool useTwlCfg;
 
 int progressAnimNum = 0;
 int progressAnimDelay = 0;
@@ -156,6 +163,7 @@ int startBorderZoomAnimDelay = 0;
 
 bool showdialogbox = false;
 bool dboxInFrame = false;
+bool dboxStopped = true;
 bool dbox_showIcon = false;
 bool dbox_selectMenu = false;
 float dbox_movespeed = 22;
@@ -174,12 +182,12 @@ int rocketVideo_videoYpos = 78;
 int frameOf60fps = 60;
 int rocketVideo_videoFrames = 249;
 int rocketVideo_currentFrame = -1;
-//int rocketVideo_frameDelay = 0;
-int frameDelay = 0;
-bool frameDelayEven = true; // For 24FPS
-//bool rocketVideo_frameDelayEven = true;
+u8 rocketVideo_fps = 25;
+u8 rocketVideo_height = 56;
+int rocketVideo_frameDelay = 0;
+bool rocketVideo_frameDelayEven = true; // For 24FPS
 bool rocketVideo_loadFrame = true;
-bool renderFrame = true;
+u16* colorTable = NULL;
 
 int bubbleYpos = 80;
 int bubbleXpos = 122;
@@ -245,7 +253,7 @@ void SetBrightness(u8 screen, s8 bright) {
 // }
 
 void bottomBgLoad(int drawBubble, bool init = false) {
-	if (init || drawBubble == 0 || (drawBubble == 2 && ms().theme == 1)) {
+	if (init || drawBubble == 0 || (drawBubble == 2 && ms().theme == TWLSettings::ETheme3DS)) {
 		if (bottomBgState != 1) {
 			tex().drawBottomBg(1);
 			bottomBgState = 1;
@@ -255,7 +263,7 @@ void bottomBgLoad(int drawBubble, bool init = false) {
 			tex().drawBottomBg(2);
 			bottomBgState = 2;
 		}
-	} else if (drawBubble == 2 && ms().theme == 0) {
+	} else if (drawBubble == 2 && ms().theme == TWLSettings::EThemeDSi) {
 		if (bottomBgState != 3) {
 			tex().drawBottomBg(3);
 			bottomBgState = 3;
@@ -267,6 +275,11 @@ void bottomBgLoad(int drawBubble, bool init = false) {
 		tex().resetCachedVolumeLevel();
 		tex().resetCachedBatteryLevel();
 		tex().resetProfileName();
+		drawCurrentDate();
+		drawCurrentTime();
+		tex().drawVolumeImageCached();
+		tex().drawBatteryImageCached();
+		tex().drawProfileName();
 		prevBottomBgState = bottomBgState;
 	}
 }
@@ -292,18 +305,46 @@ void frameRateHandler(void) {
 	frameOf60fps++;
 	if (frameOf60fps > 60) frameOf60fps = 1;
 
-	if (!renderFrame) {
-		frameDelay++;
-		switch (ms().fps) {
+	if (!rocketVideo_playVideo)
+		return;
+	if (!rocketVideo_loadFrame) {
+		rocketVideo_frameDelay++;
+		switch (rocketVideo_fps) {
 			case 11:
-				renderFrame = (frameDelay == 5+frameDelayEven);
+				rocketVideo_loadFrame = (rocketVideo_frameDelay == 5+rocketVideo_frameDelayEven);
 				break;
 			case 24:
-			//case 25:
-				renderFrame = (frameDelay == 2+frameDelayEven);
+				rocketVideo_loadFrame = (rocketVideo_frameDelay == 2+rocketVideo_frameDelayEven);
+				break;
+			case 25:
+				rocketVideo_loadFrame = (frameOf60fps == 1
+									  || frameOf60fps == 3
+									  || frameOf60fps == 5
+									  || frameOf60fps == 7
+									  || frameOf60fps == 9
+									  || frameOf60fps == 11
+									  || frameOf60fps == 14
+									  || frameOf60fps == 16
+									  || frameOf60fps == 19
+									  || frameOf60fps == 21
+									  || frameOf60fps == 24
+									  || frameOf60fps == 26
+									  || frameOf60fps == 29
+									  || frameOf60fps == 31
+									  || frameOf60fps == 34
+									  || frameOf60fps == 36
+									  || frameOf60fps == 39
+									  || frameOf60fps == 41
+									  || frameOf60fps == 44
+									  || frameOf60fps == 46
+									  || frameOf60fps == 49
+									  || frameOf60fps == 51
+									  || frameOf60fps == 54
+									  || frameOf60fps == 56
+									  || frameOf60fps == 59);
 				break;
 			case 48:
-				renderFrame = (frameOf60fps != 3
+				rocketVideo_loadFrame = (frameOf60fps != 3
 							&& frameOf60fps != 8
 							&& frameOf60fps != 13
 							&& frameOf60fps != 18
@@ -317,7 +358,7 @@ void frameRateHandler(void) {
 							&& frameOf60fps != 58);
 				break;
 			case 50:
-				renderFrame = (frameOf60fps != 3
+				rocketVideo_loadFrame = (frameOf60fps != 3
 							&& frameOf60fps != 9
 							&& frameOf60fps != 16
 							&& frameOf60fps != 22
@@ -329,61 +370,25 @@ void frameRateHandler(void) {
 							&& frameOf60fps != 58);
 				break;
 			default:
-				renderFrame = (frameDelay == 60/ms().fps);
+				rocketVideo_loadFrame = (rocketVideo_frameDelay == 60/rocketVideo_fps);
 				break;
 		}
-	}
-
-	if (!rocketVideo_playVideo)
-		return;
-	if (!rocketVideo_loadFrame) {
-		// 25FPS
-		rocketVideo_loadFrame = (frameOf60fps == 1
-							  || frameOf60fps == 3
-							  || frameOf60fps == 5
-							  || frameOf60fps == 7
-							  || frameOf60fps == 9
-							  || frameOf60fps == 11
-							  || frameOf60fps == 14
-							  || frameOf60fps == 16
-							  || frameOf60fps == 19
-							  || frameOf60fps == 21
-							  || frameOf60fps == 24
-							  || frameOf60fps == 26
-							  || frameOf60fps == 29
-							  || frameOf60fps == 31
-							  || frameOf60fps == 34
-							  || frameOf60fps == 36
-							  || frameOf60fps == 39
-							  || frameOf60fps == 41
-							  || frameOf60fps == 44
-							  || frameOf60fps == 46
-							  || frameOf60fps == 49
-							  || frameOf60fps == 51
-							  || frameOf60fps == 54
-							  || frameOf60fps == 56
-							  || frameOf60fps == 59);
 	}
 }
 
 void playRotatingCubesVideo(void) {
-	if (!rocketVideo_playVideo)
+	if (!rocketVideo_playVideo || !rocketVideo_loadFrame)
 		return;
 
-	if (rocketVideo_loadFrame) {
-		//if (renderFrame) {
-			//DC_FlushRange((void*)(rotatingCubesLocation + (rocketVideo_currentFrame * 0x7000)), 0x7000);
-			dmaCopyWordsAsynch(1, rotatingCubesLocation+(rocketVideo_currentFrame*(0x200*56)), (u16*)BG_GFX_SUB+(256*rocketVideo_videoYpos), 0x200*56);
-		//}
+	dmaCopyWordsAsynch(1, rotatingCubesLocation+(rocketVideo_currentFrame*(0x200*rocketVideo_height)), (u16*)BG_GFX_SUB+(256*rocketVideo_videoYpos), 0x200*rocketVideo_height);
 
-		rocketVideo_currentFrame++;
-		if (rocketVideo_currentFrame > rocketVideo_videoFrames) {
-			rocketVideo_currentFrame = 0;
-		}
-		//rocketVideo_frameDelay = 0;
-		//rocketVideo_frameDelayEven = !rocketVideo_frameDelayEven;
-		rocketVideo_loadFrame = false;
+	rocketVideo_currentFrame++;
+	if (rocketVideo_currentFrame > rocketVideo_videoFrames) {
+		rocketVideo_currentFrame = 0;
 	}
+	rocketVideo_frameDelay = 0;
+	rocketVideo_frameDelayEven = !rocketVideo_frameDelayEven;
+	rocketVideo_loadFrame = false;
 }
 
 void vBlankHandler() {
@@ -398,31 +403,109 @@ void vBlankHandler() {
 		needToPlayStopSound = false;
 	}
 
-	// Move title box/window closer to destination if moved
-	if(ms().theme != 4) {
-		if(titleboxXpos[ms().secondaryDevice] > titleboxXdest[ms().secondaryDevice]) {
-			titleboxXpos[ms().secondaryDevice] -= std::max((titleboxXpos[ms().secondaryDevice] - titleboxXdest[ms().secondaryDevice]) / titleboxXspeed, 1);
-		} else if(titleboxXpos[ms().secondaryDevice] < titleboxXdest[ms().secondaryDevice]) {
-			titleboxXpos[ms().secondaryDevice] += std::max((titleboxXdest[ms().secondaryDevice] - titleboxXpos[ms().secondaryDevice]) / titleboxXspeed, 1);
-		}
+	static bool updateFrame = true;
+	static bool whiteScreenPrev = whiteScreen;
+	static int currentBgPrev = currentBg;
+	static bool showSTARTborderPrev = showSTARTborder;
+	static bool displayGameIconsPrev = displayGameIcons;
+	static bool showProgressIconPrev = showProgressIcon;
+	static bool showProgressBarPrev = showProgressBar;
+	static int progressBarLengthPrev = progressBarLength;
+	static bool dbox_showIconPrev = dbox_showIcon;
+	static int movingAppYposPrev = movingAppYpos;
 
-		if(titlewindowXpos[ms().secondaryDevice] > titlewindowXdest[ms().secondaryDevice]) {
-			titlewindowXpos[ms().secondaryDevice] -= std::max((titlewindowXpos[ms().secondaryDevice] - titlewindowXdest[ms().secondaryDevice]) / titleboxXspeed, 1);
-		} else if(titlewindowXpos[ms().secondaryDevice] < titlewindowXdest[ms().secondaryDevice]) {
-			titlewindowXpos[ms().secondaryDevice] += std::max((titlewindowXdest[ms().secondaryDevice] - titlewindowXpos[ms().secondaryDevice]) / titleboxXspeed, 1);
-		}
-	} else { // In saturn theme just move instantly
-		titleboxXpos[ms().secondaryDevice] = titleboxXdest[ms().secondaryDevice];
-		titlewindowXpos[ms().secondaryDevice] = titlewindowXdest[ms().secondaryDevice];
+	if (whiteScreenPrev != whiteScreen) {
+		whiteScreenPrev = whiteScreen;
+		updateFrame = true;
 	}
 
-	if (ms().theme == 1 && rotatingCubesLoaded) {
+	if (currentBgPrev != currentBg) {
+		currentBgPrev = currentBg;
+		updateFrame = true;
+	}
+
+	if (showSTARTborderPrev != showSTARTborder) {
+		showSTARTborderPrev = showSTARTborder;
+		updateFrame = true;
+	}
+
+	if (displayGameIconsPrev != displayGameIcons) {
+		displayGameIconsPrev = displayGameIcons;
+		updateFrame = true;
+	}
+
+	if (showProgressIconPrev != showProgressIcon) {
+		showProgressIconPrev = showProgressIcon;
+		updateFrame = true;
+	}
+
+	if (showProgressBarPrev != showProgressBar) {
+		showProgressBarPrev = showProgressBar;
+		updateFrame = true;
+	}
+
+	if (progressBarLengthPrev != progressBarLength) {
+		progressBarLengthPrev = progressBarLength;
+		updateFrame = true;
+	}
+
+	if (dbox_showIconPrev != dbox_showIcon) {
+		dbox_showIconPrev = dbox_showIcon;
+		updateFrame = true;
+	}
+
+	// Move title box/window closer to destination if moved
+	if (ms().theme == TWLSettings::EThemeDSi && !draggingIcons && !scrollWindowTouched) {
+		if (titleboxXpos[ms().secondaryDevice] > titleboxXdest[ms().secondaryDevice]) {
+			titleboxXpos[ms().secondaryDevice] -= titleboxXspeed;
+			if (titleboxXpos[ms().secondaryDevice] < titleboxXdest[ms().secondaryDevice]) {
+				titleboxXpos[ms().secondaryDevice] = titleboxXdest[ms().secondaryDevice];
+			}
+			updateFrame = true;
+		} else if (titleboxXpos[ms().secondaryDevice] < titleboxXdest[ms().secondaryDevice]) {
+			titleboxXpos[ms().secondaryDevice] += titleboxXspeed;
+			if (titleboxXpos[ms().secondaryDevice] > titleboxXdest[ms().secondaryDevice]) {
+				titleboxXpos[ms().secondaryDevice] = titleboxXdest[ms().secondaryDevice];
+			}
+			updateFrame = true;
+		}
+
+		if (titlewindowXpos[ms().secondaryDevice] > titlewindowXdest[ms().secondaryDevice]) {
+			titlewindowXpos[ms().secondaryDevice] -= std::max((titlewindowXpos[ms().secondaryDevice] - titlewindowXdest[ms().secondaryDevice]) / titleboxXspeed, 1);
+			updateFrame = true;
+		} else if (titlewindowXpos[ms().secondaryDevice] < titlewindowXdest[ms().secondaryDevice]) {
+			titlewindowXpos[ms().secondaryDevice] += std::max((titlewindowXdest[ms().secondaryDevice] - titlewindowXpos[ms().secondaryDevice]) / titleboxXspeed, 1);
+			updateFrame = true;
+		}
+	} else if (ms().theme != TWLSettings::EThemeSaturn) {
+		if (titleboxXpos[ms().secondaryDevice] > titleboxXdest[ms().secondaryDevice]) {
+			titleboxXpos[ms().secondaryDevice] -= std::max((titleboxXpos[ms().secondaryDevice] - titleboxXdest[ms().secondaryDevice]) / titleboxXspeed, 1);
+			updateFrame = true;
+		} else if (titleboxXpos[ms().secondaryDevice] < titleboxXdest[ms().secondaryDevice]) {
+			titleboxXpos[ms().secondaryDevice] += std::max((titleboxXdest[ms().secondaryDevice] - titleboxXpos[ms().secondaryDevice]) / titleboxXspeed, 1);
+			updateFrame = true;
+		}
+
+		if (titlewindowXpos[ms().secondaryDevice] > titlewindowXdest[ms().secondaryDevice]) {
+			titlewindowXpos[ms().secondaryDevice] -= std::max((titlewindowXpos[ms().secondaryDevice] - titlewindowXdest[ms().secondaryDevice]) / titleboxXspeed, 1);
+			updateFrame = true;
+		} else if (titlewindowXpos[ms().secondaryDevice] < titlewindowXdest[ms().secondaryDevice]) {
+			titlewindowXpos[ms().secondaryDevice] += std::max((titlewindowXdest[ms().secondaryDevice] - titlewindowXpos[ms().secondaryDevice]) / titleboxXspeed, 1);
+			updateFrame = true;
+		}
+	} else if (titleboxXpos[ms().secondaryDevice] != titleboxXdest[ms().secondaryDevice]) { // In saturn theme just move instantly
+		titleboxXpos[ms().secondaryDevice] = titleboxXdest[ms().secondaryDevice];
+		titlewindowXpos[ms().secondaryDevice] = titlewindowXdest[ms().secondaryDevice];
+		updateFrame = true;
+	}
+
+	if (ms().theme == TWLSettings::ETheme3DS && rotatingCubesLoaded) {
 		playRotatingCubesVideo();
 	}
 
-	if (fadeType == true) {
+	if (fadeType) {
 		if (!fadeDelay) {
-			screenBrightness -= 1+(ms().theme<4 && fadeSpeed);
+			screenBrightness -= fadeSleep ? 1 : 1+(ms().theme<4 && fadeSpeed);
 			if (screenBrightness < 0)
 				screenBrightness = 0;
 		}
@@ -435,7 +518,7 @@ void vBlankHandler() {
 		}
 	} else {
 		if (!fadeDelay) {
-			screenBrightness += 1+(ms().theme<4 && fadeSpeed);
+			screenBrightness += fadeSleep ? 1 : 1+(ms().theme<4 && fadeSpeed);
 			if (screenBrightness > 31)
 				screenBrightness = 31;
 		}
@@ -448,27 +531,39 @@ void vBlankHandler() {
 		}
 	}
 
-	if (controlBottomBright && renderFrame)
-		SetBrightness(0, fadeColor ? screenBrightness : -screenBrightness);
-	if (controlTopBright && !ms().macroMode && renderFrame)
-		SetBrightness(1, fadeColor ? screenBrightness : -screenBrightness);
+	if (controlBottomBright)
+		SetBrightness(0, tc().darkLoading() ? -screenBrightness : screenBrightness);
+	if (controlTopBright && !ms().macroMode)
+		SetBrightness(1, tc().darkLoading() ? -screenBrightness : screenBrightness);
 
 	if (showdialogbox) {
 		// Dialogbox moving into view...
 		dboxInFrame = true;
+		if (ms().theme == TWLSettings::ETheme3DS) {
+			dbox_movespeed = 0;
+			if (dbox_Ypos != 0) {
+				dbox_Ypos = 0;
+				updateFrame = true;
+			}
+		}
 		if (dbox_movespeed <= 1) {
 			if (dbox_Ypos >= 0) {
 				// dbox stopped
-				dbox_movespeed = 0;
-				dbox_Ypos = 0;
-				bottomScreenBrightness = 127;
-				REG_BLDY = (0b0100 << 1);
+				if (!dboxStopped || dbox_Ypos != 0) {
+					dboxStopped = true;
+					dbox_movespeed = 0;
+					dbox_Ypos = 0;
+					bottomScreenBrightness = 127;
+					REG_BLDY = (0b0100 << 1);
+					updateFrame = true;
+				}
 			} else {
 				// dbox moving into view
 				dbox_movespeed = 1;
 			}
 		} else {
 			// Dbox decel
+			dboxStopped = false;
 			dbox_movespeed -= 1.25;
 			bottomScreenBrightness -= 7;
 			if (bottomScreenBrightness < 127) {
@@ -485,15 +580,22 @@ void vBlankHandler() {
 			if (bottomScreenBrightness > 103 && bottomScreenBrightness <= 135)
 				REG_BLDY = (0b0100 << 1);
 		}
-		dbox_Ypos += dbox_movespeed;
+		if (dbox_movespeed) {
+			dbox_Ypos += dbox_movespeed;
+			updateFrame = true;
+		}
 	} else {
 		// Dialogbox moving down...
-		if (dbox_Ypos <= -192 || dbox_Ypos >= 192) {
-			dboxInFrame = false;
-			dbox_movespeed = 22;
-			dbox_Ypos = -192;
-			bottomScreenBrightness = 255;
-			REG_BLDY = 0;
+		if (ms().theme == TWLSettings::ETheme3DS || dbox_Ypos <= -192 || dbox_Ypos >= 192) {
+			if (dboxStopped || dbox_Ypos != -192) {
+				dboxInFrame = false;
+				dboxStopped = false;
+				dbox_movespeed = 22;
+				dbox_Ypos = -192;
+				bottomScreenBrightness = 255;
+				REG_BLDY = 0;
+				updateFrame = true;
+			}
 		} else {
 			dbox_movespeed += 1;
 			dbox_Ypos += dbox_movespeed;
@@ -511,60 +613,52 @@ void vBlankHandler() {
 				REG_BLDY = (0b0011 << 1);
 			if (bottomScreenBrightness > 103 && bottomScreenBrightness <= 135)
 				REG_BLDY = (0b0100 << 1);
+
+			updateFrame = true;
 		}
 	}
 
-	if (!whiteScreen && dropDown && ms().theme == 0) {
+	if (!whiteScreen && dropDown && ms().theme == TWLSettings::EThemeDSi) { // perform dropdown anim in the DSi theme
+		static constexpr float gravity = 0.375f;
+		static constexpr float restitution = 0.37f;
+		
 		int i2 = CURPOS - 2;
 		if (i2 < 0)
 			i2 += 5;
-		for (int i = i2; i <= allowedTitleboxForDropDown + i2; i++) {
-			if (dropSeq[i % 5] == 0) {
-				titleboxYposDropDown[i % 5] += dropSpeed[i % 5];
-				if (titleboxYposDropDown[i % 5] > 0)
-					dropSeq[i % 5] = 1;
-			} else if (dropSeq[i % 5] == 1) {
-				titleboxYposDropDown[i % 5] -= dropSpeed[i % 5];
-				dropTime[i % 5]++;
-				dropSpeedChange[i % 5]++;
-				if (dropTime[i % 5] >= 15) {
-					dropSpeedChange[i % 5] = -1;
-					dropSeq[i % 5] = 2;
-				}
-				if (dropSpeedChange[i % 5] == 2) {
-					dropSpeed[i % 5]--;
-					if (dropSpeed[i % 5] < 0)
-						dropSpeed[i % 5] = 0;
-					dropSpeedChange[i % 5] = -1;
-				}
-			} else if (dropSeq[i % 5] == 2) {
-				titleboxYposDropDown[i % 5] += dropSpeed[i % 5];
-				if (titleboxYposDropDown[i % 5] >= 0) {
-					dropSeq[i % 5] = 3;
-					titleboxYposDropDown[i % 5] = 0;
-				}
-				dropSpeedChange[i % 5]++;
-				if (dropSpeedChange[i % 5] == 1) {
-					dropSpeed[i % 5]++;
-					if (dropSpeed[i % 5] > 6)
-						dropSpeed[i % 5] = 6;
-					dropSpeedChange[i % 5] = -1;
-				}
-			} else if (dropSeq[i % 5] == 3) {
-				titleboxYposDropDown[i % 5] = 0;
+
+		for (int i = i2, d = 0; i < i2 + 5; i++, d++) {
+			if (dropDelay[d] > 0) continue; // Skip if not ready
+
+			int b = i % 5;
+			if (dropBounce[b] < 3) {
+				dropSpeed[b] += gravity;
+
+				if (dropDownY[b] + dropSpeed[b] >= 0.0f) { // We collided, now bounce
+					dropDownY[b] = 0.0f;
+					dropSpeed[b] *= -restitution;
+					dropBounce[b]++;
+				} else
+					dropDownY[b] += dropSpeed[b]; // Otherwise, move Y
+
+				// Update drawing position
+				titleboxYposDropDown[b] = (int)(floorf(dropDownY[b]));
+				updateFrame = true;
+			}
+			else if (dropBounce[b] < 4) { // Stop dropdown
+				dropDownY[b] = 0.0f;
+				titleboxYposDropDown[b] = 0;
+				dropBounce[b]++;
 			}
 		}
 
-		delayForTitleboxToDropDown++;
-		if (delayForTitleboxToDropDown >= 5) {
-			allowedTitleboxForDropDown++;
-			if (allowedTitleboxForDropDown > 4)
-				allowedTitleboxForDropDown = 4;
-			delayForTitleboxToDropDown = 0;
+		// Update delays
+		for (int i = 0; i < 5; i++) {
+			if (dropDelay[i] > 0)
+				dropDelay[i]--;
 		}
 	}
 
-	if (movingApp != -1 && ms().theme == 0 && showMovingArrow) {
+	if (movingApp != -1 && ms().theme == TWLSettings::EThemeDSi && showMovingArrow) {
 		if (movingArrowYdirection) {
 			movingArrowYpos += 0.33;
 			if (movingArrowYpos > 67)
@@ -574,9 +668,20 @@ void vBlankHandler() {
 			if (movingArrowYpos < 59)
 				movingArrowYdirection = true;
 		}
+		updateFrame = true;
 	}
 
-	if (ms().theme == 5) {
+	if (movingAppYposPrev != movingAppYpos) {
+		movingAppYposPrev = movingAppYpos;
+		updateFrame = true;
+	}
+
+	if (applaunchprep && titleboxYmovepos < 192) {
+		titleboxYmovepos += 5;
+		updateFrame = true;
+	}
+
+	if (ms().theme == TWLSettings::EThemeHBL) {
 		// Back bubbles
 		for (int i = 0; i < 4; i++) {
 			backBubblesYpos[i]--;
@@ -591,22 +696,118 @@ void vBlankHandler() {
 				frontBubblesYpos[i] = frontBubblesYpos_def[i];
 			}
 		}
+		updateFrame = true;
 	}
 
-	if (renderFrame) {
+	// Blink colon once per second
+	if (colonTimer >= 60) {
+		colonTimer = 0;
+		showColon = !showColon;
+	}
+
+	colonTimer++;
+
+	if (showProgressIcon) {
+		/*loadingSoundTimer++;
+
+		if (loadingSoundTimer >= 60) {
+			loadingSoundTimer = 0;
+			mmEffectEx(&snd_loading);
+		}*/
+
+		progressAnimDelay++;
+		if (progressAnimDelay == 3) {
+			progressAnimNum++;
+			if (progressAnimNum > 7)
+				progressAnimNum = 0;
+			progressAnimDelay = 0;
+			updateFrame = true;
+		}
+	}
+
+	if (displayGameIcons || dbox_showIcon) {
+		// Playback animated icons
+		for (int i = 0; i < ((movingApp != -1) ? 41 : 40); i++) {
+			if (bnriconisDSi[i] && playBannerSequence(i) && !updateFrame) {
+				updateFrame = (displayGameIcons && (ms().theme != TWLSettings::EThemeSaturn)) ? ((i >= CURPOS-2 && i <= CURPOS+2) || i == 40) : (i == CURPOS);
+			}
+		}
+	}
+
+	if (ms().theme == TWLSettings::ETheme3DS) {
+		startBorderZoomAnimDelay++;
+		if (startBorderZoomAnimDelay == 8) {
+			startBorderZoomAnimNum++;
+			if (startBorderZoomAnimSeq[startBorderZoomAnimNum] == 0) {
+				startBorderZoomAnimNum = 0;
+			}
+			startBorderZoomAnimDelay = 0;
+			updateFrame = true;
+		}
+	} else if (startBorderZoomOut) {
+		if (useRumble) {
+			rumblePos = !rumblePos;
+			my_setRumble(rumblePos);
+		}
+		startBorderZoomAnimNum++;
+		if (startBorderZoomAnimSeq[startBorderZoomAnimNum] == 0) {
+			if (useRumble) {
+				rumblePos = false;
+				my_setRumble(rumblePos);
+			}
+			startBorderZoomAnimNum = 0;
+			startBorderZoomOut = false;
+		}
+		updateFrame = true;
+	} else {
+		startBorderZoomAnimNum = 0;
+	}
+
+	// if (applaunchprep && ms().theme == TWLSettings::EThemeDSi && launchDotDoFrameChange) {
+	// 	launchDotFrame[0]--;
+	// 	if (launchDotCurrentChangingFrame >= 1)
+	// 		launchDotFrame[1]--;
+	// 	if (launchDotCurrentChangingFrame >= 2)
+	// 		launchDotFrame[2]--;
+	// 	if (launchDotCurrentChangingFrame >= 3)
+	// 		launchDotFrame[3]--;
+	// 	if (launchDotCurrentChangingFrame >= 4)
+	// 		launchDotFrame[4]--;
+	// 	if (launchDotCurrentChangingFrame >= 5)
+	// 		launchDotFrame[5]--;
+	// 	if (launchDotCurrentChangingFrame >= 6)
+	// 		launchDotFrame[6]--;
+	// 	if (launchDotCurrentChangingFrame >= 7)
+	// 		launchDotFrame[7]--;
+	// 	if (launchDotCurrentChangingFrame >= 8)
+	// 		launchDotFrame[8]--;
+	// 	if (launchDotCurrentChangingFrame >= 9)
+	// 		launchDotFrame[9]--;
+	// 	if (launchDotCurrentChangingFrame >= 10)
+	// 		launchDotFrame[10]--;
+	// 	if (launchDotCurrentChangingFrame >= 11)
+	// 		launchDotFrame[11]--;
+	// 	for (int i = 0; i < 12; i++) {
+	// 		if (launchDotFrame[i] < 0)
+	// 			launchDotFrame[i] = 0;
+	// 	}
+	// 	launchDotCurrentChangingFrame++;
+	// 	if (launchDotCurrentChangingFrame > 11)
+	// 		launchDotCurrentChangingFrame = 11;
+	// }
+	// if (applaunchprep && ms().theme == TWLSettings::EThemeDSi)
+	// 	launchDotDoFrameChange = !launchDotDoFrameChange;
+
+	if (updateFrame) {
 		glBegin2D();
 
 		int bg_R = bottomScreenBrightness / 8;
-		int bg_G = (bottomScreenBrightness / 8) - (3 * ms().blfLevel);
-		if (bg_G < 0)
-			bg_G = 0;
-		int bg_B = (bottomScreenBrightness / 8) - (6 * ms().blfLevel);
-		if (bg_B < 0)
-			bg_B = 0;
+		int bg_G = (bottomScreenBrightness / 8);
+		int bg_B = (bottomScreenBrightness / 8);
 
 		glColor(RGB15(bg_R, bg_G, bg_B));
 
-		if (ms().theme == 5) {
+		if (ms().theme == TWLSettings::EThemeHBL) {
 			// Back bubbles
 			int bubbleXpos = 16;
 			for (int i = 0; i < 4; i++) {
@@ -624,7 +825,7 @@ void vBlankHandler() {
 			}
 		}
 
-		if (ms().theme == 0) {
+		if (ms().theme == TWLSettings::EThemeDSi) {
 			int bipXpos = 27;
 			glSprite(16 + titlewindowXpos[ms().secondaryDevice], 171, GL_FLIP_NONE,
 				 tex().scrollwindowImage());
@@ -635,15 +836,16 @@ void vBlankHandler() {
 					} else {
 						glSprite(bipXpos, 178, GL_FLIP_NONE, tex().bipsImage());
 					}
-				} else
+				} else {
 					glSprite(bipXpos, 178, GL_FLIP_NONE, &tex().bipsImage()[1]);
+				}
 				bipXpos += 5;
 			}
 			glSprite(16 + titlewindowXpos[ms().secondaryDevice], 171, GL_FLIP_NONE,
 				 &tex().buttonarrowImage()[2 + scrollWindowTouched]);
 			glSprite(0, 171, GL_FLIP_NONE, &tex().buttonarrowImage()[0 + buttonArrowTouched[0]]);
 			glSprite(224, 171, GL_FLIP_H, &tex().buttonarrowImage()[0 + buttonArrowTouched[1]]);
-			glSprite(72 - titleboxXpos[ms().secondaryDevice], 81, GL_FLIP_NONE, tex().braceImage());
+			glSprite(66 - titleboxXpos[ms().secondaryDevice], 81, GL_FLIP_NONE, tex().braceImage());
 		}
 
 		if (displayGameIcons) {
@@ -678,15 +880,19 @@ void vBlankHandler() {
 			int realCurPos = (titleboxXpos[ms().secondaryDevice] + 32) / titleboxXspacing;
 			int titleboxOffset = (realCurPos * titleboxXspacing) - (titleboxXpos[ms().secondaryDevice]);
 
-			int maxIconNumber = (ms().theme == 4 ? 0 : 3);
+			int maxIconNumber = (ms().theme == TWLSettings::EThemeSaturn ? 0 : 3);
 			for (int pos = std::max(CURPOS - maxIconNumber, 0); pos <= std::min(CURPOS + maxIconNumber, 39); pos++) {
 				int i = pos;
+
+				// Stop drawing if the rest of the boxes are empty (with hide empty boxes enabled)
+				if (ms().hideEmptyBoxes && (i != 0 && i >= spawnedtitleboxes - (movingApp != -1)))
+					break;
 
 				if (movingApp == -1) {
 					spawnedboxXpos = 96 + pos * titleboxXspacing;
 					iconXpos = 112 + pos * titleboxXspacing;
 
-					if (ms().theme == 0) {
+					if (ms().theme == TWLSettings::EThemeDSi) {
 						if (titleboxOffset >= 22 && titleboxOffset <= 32 && (i == realCurPos || i == realCurPos - 1)) {
 							int adjust = 0;
 							if (i == realCurPos)
@@ -714,7 +920,7 @@ void vBlankHandler() {
 
 				if (i < spawnedtitleboxes) {
 					if (isDirectory[i]) {
-						if (ms().theme == 1)
+						if (ms().theme == TWLSettings::ETheme3DS)
 							glSprite(spawnedboxXpos - titleboxXpos[ms().secondaryDevice],
 									 titleboxYpos, GL_FLIP_NONE,
 									 tex().folderImage());
@@ -722,9 +928,13 @@ void vBlankHandler() {
 							glSprite(spawnedboxXpos - titleboxXpos[ms().secondaryDevice],
 									 (titleboxYpos - 3) + titleboxYposDropDown[i % 5],
 									 GL_FLIP_NONE, tex().folderImage());
+						if (customIcon[i])
+							drawIcon(iconXpos - titleboxXpos[ms().secondaryDevice],
+									 (titleboxYpos + iconYposOnTitleBox) + titleboxYposDropDown[i % 5],
+									 i);
 					} else if (!applaunchprep || CURPOS != i) { // Only draw the icon if we're not launching the selcted app
 						if (!bnrSysSettings[i]) {
-							if (ms().theme == 1) {
+							if (ms().theme == TWLSettings::ETheme3DS) {
 								glSprite(spawnedboxXpos - titleboxXpos[ms().secondaryDevice],
 										 titleboxYpos, GL_FLIP_NONE,
 										 tex().boxfullImage());
@@ -738,50 +948,14 @@ void vBlankHandler() {
 							glSprite(spawnedboxXpos - titleboxXpos[ms().secondaryDevice],
 									 (titleboxYpos - 1) + titleboxYposDropDown[i % 5],
 									 GL_FLIP_NONE, &tex().settingsImage()[1]);
-						else if (bnrRomType[i] == 12)
-							drawIconINT(iconXpos - titleboxXpos[ms().secondaryDevice],
-										(titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 11)
-							drawIconPCE(iconXpos - titleboxXpos[ms().secondaryDevice],
-										(titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 10)
-							drawIconA26(iconXpos - titleboxXpos[ms().secondaryDevice],
-										(titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 9)
-							drawIconPLG(iconXpos - titleboxXpos[ms().secondaryDevice],
-										(titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 8)
-							drawIconSNES(iconXpos - titleboxXpos[ms().secondaryDevice],
-										 (titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 7)
-							drawIconMD(iconXpos - titleboxXpos[ms().secondaryDevice],
-									   (titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 6)
-							drawIconGG(iconXpos - titleboxXpos[ms().secondaryDevice],
-									   (titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 5)
-							drawIconSMS(iconXpos - titleboxXpos[ms().secondaryDevice],
-										(titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 4)
-							drawIconNES(iconXpos - titleboxXpos[ms().secondaryDevice],
-										(titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 3)
-							drawIconGBC(iconXpos - titleboxXpos[ms().secondaryDevice],
-										(titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 2)
-							drawIconGB(iconXpos - titleboxXpos[ms().secondaryDevice],
-									   (titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
-						else if (bnrRomType[i] == 1)
-							drawIconGBA(iconXpos - titleboxXpos[ms().secondaryDevice],
-										(titleboxYpos + 12) + titleboxYposDropDown[i % 5]);
 						else
 							drawIcon(iconXpos - titleboxXpos[ms().secondaryDevice],
-									 (titleboxYpos + 12) + titleboxYposDropDown[i % 5],
-									 i);
+										(titleboxYpos + iconYposOnTitleBox) + titleboxYposDropDown[i % 5],
+										i);
 					}
 				} else {
 					// Empty box
-					if (ms().theme > 0) {
+					if (ms().theme > TWLSettings::EThemeDSi) {
 						glSprite(spawnedboxXpos - titleboxXpos[ms().secondaryDevice],
 								 titleboxYpos + titleboxYposDropDown[i % 5],
 								 GL_FLIP_NONE, tex().boxemptyImage());
@@ -795,14 +969,18 @@ void vBlankHandler() {
 
 			if (movingApp != -1) {
 				if (movingAppIsDir) {
-					if (ms().theme == 1)
+					if (ms().theme == TWLSettings::ETheme3DS)
 						glSprite(96, titleboxYpos - movingAppYpos, GL_FLIP_NONE, tex().folderImage());
 					else
 						glSprite(96, titleboxYpos - movingAppYpos + titleboxYposDropDown[movingApp % 5],
 								 GL_FLIP_NONE, tex().folderImage());
+					if (customIcon[movingApp])
+						drawIcon(112,
+								 (titleboxYpos + iconYposOnTitleBox) - movingAppYpos + titleboxYposDropDown[movingApp % 5],
+								 -1);
 				} else {
 					if (!bnrSysSettings[movingApp]) {
-						if (ms().theme == 1) {
+						if (ms().theme == TWLSettings::ETheme3DS) {
 							glSprite(96, titleboxYpos - movingAppYpos, GL_FLIP_NONE,
 									 tex().boxfullImage());
 						} else {
@@ -815,52 +993,29 @@ void vBlankHandler() {
 						glSprite(96,
 								 (titleboxYpos - 1) - movingAppYpos + titleboxYposDropDown[movingApp % 5],
 								 GL_FLIP_NONE, &tex().settingsImage()[1]);
-					else if (bnrRomType[movingApp] == 12)
-						drawIconINT(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 11)
-						drawIconPCE(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 10)
-						drawIconA26(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 9)
-						drawIconPLG(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 8)
-						drawIconSNES(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 7)
-						drawIconMD(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 6)
-						drawIconGG(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 5)
-						drawIconSMS(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 4)
-						drawIconNES(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 3)
-						drawIconGBC(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 2)
-						drawIconGB(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
-					else if (bnrRomType[movingApp] == 1)
-						drawIconGBA(112, (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5]);
 					else
-						drawIcon(112,
-								 (titleboxYpos + 12) - movingAppYpos + titleboxYposDropDown[movingApp % 5],
-								 -1);
+						drawIcon(112, (titleboxYpos + iconYposOnTitleBox) - movingAppYpos + titleboxYposDropDown[movingApp % 5], -1);
 				}
 			}
 
-			if (ms().theme == 0) {
-				glSprite(spawnedboxXpos + titleboxXspacing + 10 - titleboxXpos[ms().secondaryDevice], 81, GL_FLIP_H, tex().braceImage());
+			if (ms().theme == TWLSettings::EThemeDSi) {
+				glSprite(spawnedboxXpos + titleboxXspacing + 20 - titleboxXpos[ms().secondaryDevice], 81, GL_FLIP_H, tex().braceImage());
 			}
 
-			if (movingApp != -1 && ms().theme==0 && showMovingArrow) {
+			if (movingApp != -1 && ms().theme == TWLSettings::EThemeDSi && showMovingArrow) {
 				glSprite(115, movingArrowYpos, GL_FLIP_NONE, tex().movingArrowImage());
 			}
 		}
 
 		// Top icons for 3DS theme
-		if (ms().theme == 1) {
+		if (ms().theme == TWLSettings::ETheme3DS) {
 			int topIconXpos = 116;
+			for (int i = 0; i < 3; i++) {
+				topIconXpos -= 16;
+			}
 			if ((isDSiMode() && sdFound()) || bothSDandFlashcard()) {
 				//for (int i = 0; i < 2; i++) {
-					topIconXpos -= 14;
+					topIconXpos -= 16;
 				//}
 				if (ms().secondaryDevice) {
 					glSprite(topIconXpos, 1, GL_FLIP_NONE, &tex().smallCartImage()[2]); // SD card
@@ -868,24 +1023,30 @@ void vBlankHandler() {
 					glSprite(topIconXpos, 1, GL_FLIP_NONE,
 						 &tex().smallCartImage()[(REG_SCFG_MC == 0x11) ? 1 : 0]); // Slot-1 card
 				}
-				topIconXpos += 28;
-			} else if (ms().showGba == 1 && (io_dldi_data->ioInterface.features & FEATURE_SLOT_NDS)) {
+				topIconXpos += 32;
+			} else if (ms().gbaBooter == TWLSettings::EGbaNativeGbar2 && (io_dldi_data->ioInterface.features & FEATURE_SLOT_NDS)) {
 				// for (int i = 0; i < 2; i++) {
-					topIconXpos -= 14;
+					topIconXpos -= 16;
 				//}
-				//if (ms().showGba == 2) {
+				//if (ms().gbaBooter == TWLSettings::EGbaGbar2) {
 				//	drawSmallIconGBA(topIconXpos, 1); // GBARunner2
 				//} else {
 					glSprite(topIconXpos, 1, GL_FLIP_NONE, &tex().smallCartImage()[3]); // GBA Mode
 				//}
-				topIconXpos += 28;
+				topIconXpos += 32;
 			}
 			if (io_dldi_data->ioInterface.features & FEATURE_SLOT_GBA) {
-				topIconXpos -= 14;
+				topIconXpos -= 16;
 				glSprite(topIconXpos, 1, GL_FLIP_NONE,
 					 &tex().smallCartImage()[0]); // Slot-1 card
-				topIconXpos += 28;
+				topIconXpos += 32;
 			}
+			glSprite(topIconXpos, 1, GL_FLIP_NONE, &tex().smallCartImage()[5]); // Pictochat
+			topIconXpos += 32;
+			glSprite(topIconXpos, 1, GL_FLIP_NONE, &tex().smallCartImage()[6]); // DS Download Play
+			topIconXpos += 32;
+			glSprite(topIconXpos, 1, GL_FLIP_NONE, &tex().smallCartImage()[7]); // Internet Browser
+			topIconXpos += 32;
 			glSprite(topIconXpos, 1, GL_FLIP_NONE, &tex().smallCartImage()[4]); // Manual
 
 			// Replace by baked-in backgrounds on 3DS.
@@ -896,47 +1057,21 @@ void vBlankHandler() {
 		}
 
 		if (applaunchprep) {
-
 			if (isDirectory[CURPOS]) {
 				glSprite(96, 87 - titleboxYmovepos, GL_FLIP_NONE, tex().folderImage());
+				if (customIcon[CURPOS])
+					drawIcon(112, 96 - titleboxYmovepos, CURPOS);
 			} else {
 				if (!bnrSysSettings[CURPOS]) {
 					glSprite(96, 84 - titleboxYmovepos, GL_FLIP_NONE, tex().boxfullImage());
 				}
 				if (bnrSysSettings[CURPOS])
-					glSprite(84, 83 - titleboxYmovepos, GL_FLIP_NONE, &tex().settingsImage()[1]);
-				else if (bnrRomType[CURPOS] == 12)
-					drawIconINT(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 11)
-					drawIconPCE(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 10)
-					drawIconA26(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 9)
-					drawIconPLG(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 8)
-					drawIconSNES(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 7)
-					drawIconMD(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 6)
-					drawIconGG(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 5)
-					drawIconSMS(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 4)
-					drawIconNES(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 3)
-					drawIconGBC(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 2)
-					drawIconGB(112, 96 - titleboxYmovepos);
-				else if (bnrRomType[CURPOS] == 1)
-					drawIconGBA(112, 96 - titleboxYmovepos);
+					glSprite(96, 83 - titleboxYmovepos, GL_FLIP_NONE, &tex().settingsImage()[1]);
 				else
 					drawIcon(112, 96 - titleboxYmovepos, CURPOS);
 			}
 			// Draw dots after selecting a game/app
-
 			dots().drawAuto();
-
-			titleboxYmovepos += 5;
 		}
 		if (showSTARTborder && displayGameIcons && (ms().theme < 4)) {
 			glSprite(96, tc().startBorderRenderY(), GL_FLIP_NONE,
@@ -949,8 +1084,8 @@ void vBlankHandler() {
 				glSprite(96, tc().startBorderRenderY(), GL_FLIP_NONE,
 					 &tex().wirelessIcons()[(bnrWirelessIcon[CURPOS] - 1) & 31]);
 
-			if (ms().theme == 0) {
-				if (currentBg == 1 && ms().theme == 0 && needToPlayStopSound &&
+			if (ms().theme == TWLSettings::EThemeDSi) {
+				if (currentBg == 1 && ms().theme == TWLSettings::EThemeDSi && needToPlayStopSound &&
 					waitForNeedToPlayStopSound == 0) {
 					// mmEffectEx(&snd_stop);
 					snd().playStop();
@@ -969,46 +1104,62 @@ void vBlankHandler() {
 		}
 
 		// Refresh the background layer.
-		if (currentBg == 1 && ms().theme != 4 && ms().theme != 5)
+		if (currentBg == 1 && ms().theme != TWLSettings::EThemeSaturn && ms().theme != TWLSettings::EThemeHBL)
 			drawBubble(tex().bubbleImage());
-		if (showSTARTborder && displayGameIcons && ms().theme == 0) {
+		if (showSTARTborder && displayGameIcons && ms().theme == TWLSettings::EThemeDSi) {
 			glSprite(96, tc().startTextRenderY(), GL_FLIP_NONE, &tex().startImage()[ms().getGameLanguage()]);
 		}
 
-		glColor(RGB15(31, 31 - (3 * ms().blfLevel), 31 - (6 * ms().blfLevel)));
-		if (dbox_Ypos != -192 || (ms().theme == 4 && currentBg == 1) || ms().theme == 5) {
+		glColor(RGB15(31, 31, 31));
+		if (dbox_Ypos != -192 || (ms().theme == TWLSettings::EThemeSaturn && currentBg == 1) || ms().theme == TWLSettings::EThemeHBL) {
 			// Draw the dialog box.
-			if (ms().theme != 4 && ms().theme != 5) drawDbox();
+			if (ms().theme != TWLSettings::EThemeSaturn && ms().theme != TWLSettings::EThemeHBL) drawDbox();
 			if (dbox_showIcon && !isDirectory[CURPOS]) {
-				drawIcon(ms().rtl() ? 256 - 56 : 24, ((ms().theme == 4 || ms().theme == 5) ? 0 : dbox_Ypos) + 24, CURPOS);
+				drawIcon(ms().rtl() ? 256 - 56 : 24,
+							((ms().theme == TWLSettings::EThemeSaturn || ms().theme == TWLSettings::EThemeHBL) ? 0 : dbox_Ypos) + 24,
+							CURPOS);
 			}
 			if (dbox_selectMenu) {
 				int selIconYpos = 96;
 				int selIconXpos = ms().rtl() ? 256 - 56 : 32;
-				if (isDSiMode() && memcmp(io_dldi_data->friendlyName, "CycloDS iEvolution", 18) != 0) {
-					for (int i = 0; i < 4; i++) {
-						selIconYpos -= 14;
+				if (ms().kioskMode) {
+					if (sdFound()) {
+						for (int i = 0; i < 3; i++) {
+							selIconYpos -= 14;
+						}
+					} else {
+						for (int i = 0; i < 2; i++) {
+							selIconYpos -= 14;
+						}
 					}
 				} else {
-					for (int i = 0; i < 3; i++) {
-						selIconYpos -= 14;
+					if (sdFound()) {
+						for (int i = 0; i < 4; i++) {
+							selIconYpos -= 14;
+						}
+					} else {
+						for (int i = 0; i < 3; i++) {
+							selIconYpos -= 14;
+						}
 					}
 				}
 				if (!sys().isRegularDS()) {
-					glSprite(selIconXpos, (ms().theme == 4 ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
+					glSprite(selIconXpos, (ms().theme == TWLSettings::EThemeSaturn ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
 						 &tex().cornerButtonImage()[1]); // System Menu
 					selIconYpos += 28;
 				}
-				glSprite(selIconXpos, (ms().theme == 4 ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
-					 &tex().cornerButtonImage()[0]); // Settings
-				selIconYpos += 28;
-				if (isDSiMode() && memcmp(io_dldi_data->friendlyName, "CycloDS iEvolution", 18) != 0) {
+				if (!ms().kioskMode) {
+					glSprite(selIconXpos, (ms().theme == TWLSettings::EThemeSaturn ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
+						 &tex().cornerButtonImage()[0]); // Settings
+					selIconYpos += 28;
+				}
+				if (sdFound()) {
 					if (ms().secondaryDevice) {
-						glSprite(selIconXpos, (ms().theme == 4 ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
+						glSprite(selIconXpos, (ms().theme == TWLSettings::EThemeSaturn ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
 							 &tex().smallCartImage()[2]); // SD card
 					} else {
 						glSprite(
-							selIconXpos, (ms().theme == 4 ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
+							selIconXpos, (ms().theme == TWLSettings::EThemeSaturn ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
 							&tex().smallCartImage()[(REG_SCFG_MC == 0x11) ? 1
 												  : 0]); // Slot-1 card
 					}
@@ -1016,17 +1167,17 @@ void vBlankHandler() {
 				}
 				if (io_dldi_data->ioInterface.features & FEATURE_SLOT_GBA) {
 					glSprite(
-						selIconXpos, (ms().theme == 4 ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
+						selIconXpos, (ms().theme == TWLSettings::EThemeSaturn ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
 						&tex().smallCartImage()[0]); // Slot-1 card
 					selIconYpos += 28;
-				} else if (sys().isRegularDS() && ms().showGba != 2) {
-				/*	drawSmallIconGBA(selIconXpos, (ms().theme == 4 ? 0 : dbox_Ypos) + selIconYpos); // GBARunner2
+				} else if (sys().isRegularDS() && ms().gbaBooter != 2) {
+				/*	drawSmallIconGBA(selIconXpos, (ms().theme == TWLSettings::EThemeSaturn ? 0 : dbox_Ypos) + selIconYpos); // GBARunner2
 				} else {*/
-					glSprite(selIconXpos, (ms().theme == 4 ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
+					glSprite(selIconXpos, (ms().theme == TWLSettings::EThemeSaturn ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
 						 &tex().smallCartImage()[3]); // GBA Mode
 					selIconYpos += 28;
 				}
-				glSprite(selIconXpos, (ms().theme == 4 ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
+				glSprite(selIconXpos, (ms().theme == TWLSettings::EThemeSaturn ? 0 : dbox_Ypos) + selIconYpos, GL_FLIP_NONE,
 					 tex().manualImage()); // Manual
 			}
 		}
@@ -1038,137 +1189,52 @@ void vBlankHandler() {
 				}
 			}*/
 		if (whiteScreen) {
-			glBoxFilled(0, 0, 256, 192, RGB15(31, 31 - (3 * ms().blfLevel), 31 - (6 * ms().blfLevel)));
+			glBoxFilled(0, 0, 256, 192, tc().darkLoading() ? RGB15(0, 0, 0) : RGB15(31, 31, 31));
 		}
-		if (showProgressIcon && ms().theme != 4) {
+		if (showProgressIcon && ms().theme != TWLSettings::EThemeSaturn) {
 			glSprite(ms().rtl() ? 16 : 224, 152, GL_FLIP_NONE, &tex().progressImage()[progressAnimNum]);
 		}
 		if (showProgressBar) {
+			if (progressBarLength > 192) progressBarLength = 192;
 			int barXpos = ms().rtl() ? 256 - 19 : 19;
 			int barYpos = 157;
-			if (ms().theme == 4) {
+			if (ms().theme == TWLSettings::EThemeSaturn) {
 				barXpos += ms().rtl() ? -12 : 12;
 				barYpos += 12;
 			}
-			if(ms().rtl()) {
-				glBoxFilled(barXpos, barYpos, barXpos-192, barYpos+5, RGB15(23, 23, 23));
+			extern int getFavoriteColor(void);
+			int fillColor = tc().progressBarUserPalette() ? progressBarColors[getFavoriteColor()] : tc().progressBarColor();
+			if (colorTable) fillColor = colorTable[fillColor];
+			if (ms().rtl()) {
+				glBoxFilled(barXpos, barYpos, barXpos-192, barYpos+5, tc().darkLoading() ? RGB15(6, 6, 6) : RGB15(23, 23, 23));
 				if (progressBarLength > 0) {
-					glBoxFilled(barXpos, barYpos, barXpos-progressBarLength, barYpos+5, RGB15(0, 0, 31 - (6 * ms().blfLevel)));
+					glBoxFilled(barXpos, barYpos, barXpos-progressBarLength, barYpos+5, fillColor);
 				}
 			} else {
-				glBoxFilled(barXpos, barYpos, barXpos+192, barYpos+5, RGB15(23, 23, 23));
+				glBoxFilled(barXpos, barYpos, barXpos+192, barYpos+5, tc().darkLoading() ? RGB15(6, 6, 6) : RGB15(23, 23, 23));
 				if (progressBarLength > 0) {
-					glBoxFilled(barXpos, barYpos, barXpos+progressBarLength, barYpos+5, RGB15(0, 0, 31 - (6 * ms().blfLevel)));
+					glBoxFilled(barXpos, barYpos, barXpos+progressBarLength, barYpos+5, fillColor);
 				}
 			}
 		}
 
-		if (vblankRefreshCounter >= REFRESH_EVERY_VBLANKS) {
-			if (showdialogbox && dbox_Ypos == -192) {
-				// Reload the dialog box palettes here...
-				reloadDboxPalette();
-			} else if (!showdialogbox) {
-				reloadIconPalettes();
-			}
-			vblankRefreshCounter = 0;
-		} else {
-			vblankRefreshCounter++;
-		}
 		//}
 		glEnd2D();
 		GFX_FLUSH = 0;
-
-		// Blink colon once per second
-		if (colonTimer >= 60) {
-			colonTimer = 0;
-			showColon = !showColon;
-		}
-
-		frameDelay = 0;
-		frameDelayEven = !frameDelayEven;
-		renderFrame = (ms().fps == 60);
+		updateFrame = false;
 	}
 
-	colonTimer++;
-
-	if (showProgressIcon) {
-		/*loadingSoundTimer++;
-
-		if (loadingSoundTimer >= 60) {
-			loadingSoundTimer = 0;
-			mmEffectEx(&snd_loading);
-		}*/
-
-		progressAnimDelay++;
-		if (progressAnimDelay == 3) {
-			progressAnimNum++;
-			if (progressAnimNum > 7)
-				progressAnimNum = 0;
-			progressAnimDelay = 0;
+	if (vblankRefreshCounter >= REFRESH_EVERY_VBLANKS) {
+		if (showdialogbox && dbox_Ypos == -192) {
+			// Reload the dialog box palettes here...
+			reloadDboxPalette();
+		} else if (!showdialogbox) {
+			reloadIconPalettes();
 		}
-	}
-	if (displayGameIcons || dbox_showIcon) {
-		// Playback animated icons
-		for (int i = 0; i < 41; i++) {
-			if (bnriconisDSi[i] == true) {
-				playBannerSequence(i);
-			}
-		}
-	}
-
-	if (ms().theme == 1) {
-		startBorderZoomAnimDelay++;
-		if (startBorderZoomAnimDelay == 8) {
-			startBorderZoomAnimNum++;
-			if (startBorderZoomAnimSeq[startBorderZoomAnimNum] == 0) {
-				startBorderZoomAnimNum = 0;
-			}
-			startBorderZoomAnimDelay = 0;
-		}
-	} else if (startBorderZoomOut) {
-		startBorderZoomAnimNum++;
-		if (startBorderZoomAnimSeq[startBorderZoomAnimNum] == 0) {
-			startBorderZoomAnimNum = 0;
-			startBorderZoomOut = false;
-		}
+		vblankRefreshCounter = 0;
 	} else {
-		startBorderZoomAnimNum = 0;
+		vblankRefreshCounter++;
 	}
-
-	// if (applaunchprep && ms().theme == 0 && launchDotDoFrameChange) {
-	// 	launchDotFrame[0]--;
-	// 	if (launchDotCurrentChangingFrame >= 1)
-	// 		launchDotFrame[1]--;
-	// 	if (launchDotCurrentChangingFrame >= 2)
-	// 		launchDotFrame[2]--;
-	// 	if (launchDotCurrentChangingFrame >= 3)
-	// 		launchDotFrame[3]--;
-	// 	if (launchDotCurrentChangingFrame >= 4)
-	// 		launchDotFrame[4]--;
-	// 	if (launchDotCurrentChangingFrame >= 5)
-	// 		launchDotFrame[5]--;
-	// 	if (launchDotCurrentChangingFrame >= 6)
-	// 		launchDotFrame[6]--;
-	// 	if (launchDotCurrentChangingFrame >= 7)
-	// 		launchDotFrame[7]--;
-	// 	if (launchDotCurrentChangingFrame >= 8)
-	// 		launchDotFrame[8]--;
-	// 	if (launchDotCurrentChangingFrame >= 9)
-	// 		launchDotFrame[9]--;
-	// 	if (launchDotCurrentChangingFrame >= 10)
-	// 		launchDotFrame[10]--;
-	// 	if (launchDotCurrentChangingFrame >= 11)
-	// 		launchDotFrame[11]--;
-	// 	for (int i = 0; i < 12; i++) {
-	// 		if (launchDotFrame[i] < 0)
-	// 			launchDotFrame[i] = 0;
-	// 	}
-	// 	launchDotCurrentChangingFrame++;
-	// 	if (launchDotCurrentChangingFrame > 11)
-	// 		launchDotCurrentChangingFrame = 11;
-	// }
-	// if (applaunchprep && ms().theme == 0)
-	// 	launchDotDoFrameChange = !launchDotDoFrameChange;
 
 	if (boxArtColorDeband) {
 		//ndmaCopyWordsAsynch(0, tex().frameBuffer(secondBuffer), BG_GFX, 0x18000);
@@ -1186,11 +1252,11 @@ void loadPhotoList() {
 	DIR *dir;
 	struct dirent *ent;
 	std::string photoDir;
-	std::string dirPath = "sd:/_nds/TWiLightMenu/dsimenu/photos/";
+	std::string dirPath = sys().isRunFromSD() ? "sd:/_nds/TWiLightMenu/dsimenu/photos/" : "fat:/_nds/TWiLightMenu/dsimenu/photos/";
 	std::vector<std::string> photoList;
 
 	if ((dir = opendir(dirPath.c_str())) == NULL) {
-		dirPath = "fat:/_nds/TWiLightMenu/dsimenu/photos/";
+		dirPath = sys().isRunFromSD() ? "fat:/_nds/TWiLightMenu/dsimenu/photos/" : "sd:/_nds/TWiLightMenu/dsimenu/photos/";
 		dir = opendir(dirPath.c_str());
 	}
 
@@ -1206,27 +1272,27 @@ void loadPhotoList() {
 			photoList.emplace_back(dirPath + photoDir);
 		}
 		closedir(dir);
-		if(photoList.size() > 0) {
+		if (photoList.size() > 0) {
 			loadPhoto(photoList[rand() / ((RAND_MAX + 1u) / photoList.size())]);
 			return;
 		}
 	}
 
 	// If no photos found, try find a bootstrap screenshot
-	FILE *file = fopen("sd:/_nds/nds-bootstrap/screenshots.tar", "rb");
-	if(!file)
-		file = fopen("fat:/_nds/nds-bootstrap/screenshots.tar", "rb");
+	FILE *file = fopen(sys().isRunFromSD() ? "sd:/_nds/nds-bootstrap/screenshots.tar" : "fat:/_nds/nds-bootstrap/screenshots.tar", "rb");
+	if (!file)
+		file = fopen(sys().isRunFromSD() ? "fat:/_nds/nds-bootstrap/screenshots.tar" : "sd:/_nds/nds-bootstrap/screenshots.tar", "rb");
 	
-	if(file) {
+	if (file) {
 		std::vector<int> screenshots;
 		fseek(file, 0x200, SEEK_SET);
-		for(int i = 0; i < 50; i++) {
-			if(fgetc(file) == 'B')
+		for (int i = 0; i < 50; i++) {
+			if (fgetc(file) == 'B')
 				screenshots.push_back(i);
 			fseek(file, 0x18400 - 1, SEEK_CUR);
 		}
 
-		if(screenshots.size() > 0) {
+		if (screenshots.size() > 0) {
 			fseek(file, 0x200 + 0x18400 * (screenshots[rand() % screenshots.size()]), SEEK_SET);
 			loadBootstrapScreenshot(file);
 			return;
@@ -1245,13 +1311,13 @@ void loadPhoto(const std::string &path) {
 
 	lodepng::decode(image, photoWidth, photoHeight, path);
 
-	if(photoWidth > 208 || photoHeight > 156) {
+	if (photoWidth > 208 || photoHeight > 156) {
 		image.clear();
 		// Image is too big, load the default
 		lodepng::decode(image, photoWidth, photoHeight, "nitro:/graphics/photo_default.png");
 	}
 
-	for(uint i=0;i<image.size()/4;i++) {
+	for (uint i=0;i<image.size()/4;i++) {
 		if (boxArtColorDeband) {
 			image[(i*4)+3] = 0;
 			if (alternatePixel) {
@@ -1269,9 +1335,11 @@ void loadPhoto(const std::string &path) {
 				}
 			}
 		}
-		tex().photoBuffer()[i] = image[i*4]>>3 | (image[(i*4)+1]>>3)<<5 | (image[(i*4)+2]>>3)<<10 | BIT(15);
-		if (ms().colorMode == 1) {
-			tex().photoBuffer()[i] = convertVramColorToGrayscale(tex().photoBuffer()[i]);
+		u16 color = image[i*4]>>3 | (image[(i*4)+1]>>3)<<5 | (image[(i*4)+2]>>3)<<10 | BIT(15);
+		if (colorTable) {
+			tex().photoBuffer()[i] = colorTable[color];
+		} else {
+			tex().photoBuffer()[i] = color;
 		}
 		if (boxArtColorDeband) {
 			if (alternatePixel) {
@@ -1295,9 +1363,11 @@ void loadPhoto(const std::string &path) {
 					image[(i*4)+2] -= 0x4;
 				}
 			}
-			tex().photoBuffer2()[i] = image[i*4]>>3 | (image[(i*4)+1]>>3)<<5 | (image[(i*4)+2]>>3)<<10 | BIT(15);
-			if (ms().colorMode == 1) {
-				tex().photoBuffer2()[i] = convertVramColorToGrayscale(tex().photoBuffer()[i]);
+			color = image[i*4]>>3 | (image[(i*4)+1]>>3)<<5 | (image[(i*4)+2]>>3)<<10 | BIT(15);
+			if (colorTable) {
+				tex().photoBuffer2()[i] = colorTable[color];
+			} else {
+				tex().photoBuffer2()[i] = color;
 			}
 			if ((i % photoWidth) == photoWidth-1) alternatePixel = !alternatePixel;
 			alternatePixel = !alternatePixel;
@@ -1308,8 +1378,11 @@ void loadPhoto(const std::string &path) {
 	u16* bgSubBuffer2 = tex().bgSubBuffer2();
 
 	// Fill area with black
-	for(int y = 24; y < 180; y++) {
+	for (int y = 24; y < 180; y++) {
 		dmaFillHalfWords(0x8000, bgSubBuffer + (y * 256) + 24, 208 * 2);
+		if (boxArtColorDeband) {
+			dmaFillHalfWords(0x8000, bgSubBuffer2 + (y * 256) + 24, 208 * 2);
+		}
 	}
 
 	// Start loading
@@ -1334,7 +1407,7 @@ void loadPhoto(const std::string &path) {
 
 void loadBootstrapScreenshot(FILE *file) {
 	// Simple check to ensure we're seeked to a BMP
-	if(fgetc(file) != 'B' || fgetc(file) != 'M')
+	if (fgetc(file) != 'B' || fgetc(file) != 'M')
 		return;
 
 	photoWidth = 208;
@@ -1343,7 +1416,7 @@ void loadBootstrapScreenshot(FILE *file) {
 	// All nds-bootstrap screenshots should be this size, if it's not something's wrong
 	u32 bmpSize;
 	fread(&bmpSize, 4, 1, file);
-	if(bmpSize != 0x18046)
+	if (bmpSize != 0x18046)
 		return;
 
 	fseek(file, 0x40, SEEK_CUR);
@@ -1354,7 +1427,7 @@ void loadBootstrapScreenshot(FILE *file) {
 	u16* bgSubBuffer2 = tex().bgSubBuffer2();
 
 	// Fill area with black
-	for(int y = 24; y < 180; y++) {
+	for (int y = 24; y < 180; y++) {
 		dmaFillHalfWords(0x8000, bgSubBuffer + (y * 256) + 24, 208 * 2);
 	}
 
@@ -1365,6 +1438,9 @@ void loadBootstrapScreenshot(FILE *file) {
 
 			// RGB 565 -> BGR 5551
 			val = ((val >> 11) & 0x1F) | ((val & (0x1F << 6)) >> 1) | ((val & 0x1F) << 10) | BIT(15);
+			if (colorTable) {
+				val = colorTable[val]; // TODO: Remove this when nds-bootstrap supports color modes
+			}
 
 			u8 y = photoHeight - row - 1;
 			bgSubBuffer[(24 + y) * 256 + 24 + col] = val;
@@ -1380,54 +1456,17 @@ void loadBootstrapScreenshot(FILE *file) {
 	delete[] buffer;
 }
 
-// Load photo without overwriting shoulder button images
-void loadPhotoPart() {
-	u16 *bgSubBuffer = tex().beginBgSubModify();
-	u16* bgSubBuffer2 = tex().bgSubBuffer2();
-
-	// Fill area with black
-	for(int y = 24; y < 172; y++) {
-		dmaFillHalfWords(0x8000, bgSubBuffer + (y * 256) + 24, 208 * 2);
-	}
-
-	// Start loading
-	u16 *src = tex().photoBuffer();
-	u16 *src2 = tex().photoBuffer2();
-	uint startX = 24 + (208 - photoWidth) / 2;
-	uint y = 24 + ((156 - photoHeight) / 2);
-	uint x = startX;
-	for (uint i = 0; i < photoWidth * photoHeight; i++) {
-		if (x >= startX + photoWidth) {
-			x = startX;
-			y++;
-			if(y >= 172)	break;
-		}
-		bgSubBuffer[y * 256 + x] = *(src++);
-		if (boxArtColorDeband) {
-			bgSubBuffer2[y * 256 + x] = *(src2++);
-		}
-		x++;
-	}
-	tex().commitBgSubModify();
-}
-
 static std::string loadedDate;
 
 ITCM_CODE void drawCurrentDate() {
 	// Load date
-	int x = (ms().theme >= 4 ? 122 : 162);
-	if (ms().theme == 5) {
-		x -= 28;
-	}
-	int y = (ms().theme == 4 ? 12 : 7);
-
 	std::string currentDate = getDate();
 	if (currentDate == loadedDate && !reloadDate)
 		return;
 
 	loadedDate = currentDate;
 
-	ms().macroMode ? tex().drawDateTimeMacro(loadedDate.c_str(), x, y) : tex().drawDateTime(loadedDate.c_str(), x, y);
+	ms().macroMode ? tex().drawDateTimeMacro(loadedDate.c_str(), tc().dateRenderX(), tc().dateRenderY(), true) : tex().drawDateTime(loadedDate.c_str(), tc().dateRenderX(), tc().dateRenderY(), true);
 
 	reloadDate = false;
 }
@@ -1436,68 +1475,84 @@ static std::string loadedTime;
 
 ITCM_CODE void drawCurrentTime() {
 	// Load time
-	int x = (ms().theme >= 4 ? 162 : 200);
-	if (ms().theme == 5) {
-		x -= 28;
-	}
-	int y = (ms().theme == 4 ? 12 : 7);
-
 	std::string currentTime = retTime();
 	if (currentTime[0] == ' ')
 		currentTime[0] = '0';
-	currentTime[2] = showColon ? ':' : ';';
+	currentTime[2] = showColon ? ':' : ' ';
 
 	if (currentTime == loadedTime && !reloadTime)
 		return;
 
 	loadedTime = currentTime;
 
-	ms().macroMode ? tex().drawDateTimeMacro(currentTime.c_str(), x, y) : tex().drawDateTime(currentTime.c_str(), x, y);
+	ms().macroMode ? tex().drawDateTimeMacro(currentTime.c_str(), tc().timeRenderX(), tc().timeRenderY(), false) : tex().drawDateTime(currentTime.c_str(), tc().timeRenderX(), tc().timeRenderY(), false);
 
 	reloadTime = false;
 }
 
 void clearBoxArt() {
 	if (ms().macroMode) return;
-
-	if (!tc().renderPhoto()) {
-		// tex().drawTopBg();
-		// tex().drawProfileName();
-		// tex().drawBatteryImageCached();
-		// tex().drawVolumeImageCached();
-		// tex().drawShoulders(showLshoulder, showR);
-		// drawCurrentDate();
-		// drawCurrentTime();
-		tex().drawTopBgAvoidingShoulders();
-	} else {
-		loadPhotoPart();
-	}
+	tex().drawOverBoxArt(photoWidth, photoHeight);
 }
 
 // static char videoFrameFilename[256];
 
 void graphicsInit() {
-	//logPrint("graphicsInit()\n");
+	logPrint("graphicsInit()\n");
 
 	// for (int i = 0; i < 12; i++) {
 	// 	launchDotFrame[i] = 5;
 	// }
 
-	for (int i = 0; i < 5; i++) {
-		dropTime[i] = 0;
-		dropSeq[i] = 0;
-		dropSpeed[i] = dropSpeedDefine;
-		dropSpeedChange[i] = 0;
-		if (ms().theme == 1 || ms().theme == 4 || ms().theme == 5)
-			titleboxYposDropDown[i] = 0;
-		else
-			titleboxYposDropDown[i] = -85 - 80;
+	if (ms().theme == TWLSettings::EThemeDSi) {
+		titleboxXspeed = 8;
+		iconYposOnTitleBox = 13;
 	}
 
-	allowedTitleboxForDropDown = 0;
-	delayForTitleboxToDropDown = 0;
-	dropDown = false;
+	for (int i = 0; i < 5; i++) {
+		dropBounce[i] = 0;
+		dropSpeed[i] = initialDropSpeed;
 
+		if (ms().theme == TWLSettings::ETheme3DS || ms().theme == TWLSettings::EThemeSaturn || ms().theme == TWLSettings::EThemeHBL) {
+			dropDownY[i] = 0.0f;
+			titleboxYposDropDown[i] = 0;
+		} else {
+			dropDownY[i] = -85.0f - 80.0f;
+			titleboxYposDropDown[i] = dropDownY[i];
+		}
+	}
+	int dropDownType = rand() % 4;
+	switch (dropDownType) {
+		// Left to Right
+		case 0:
+			for (int i = 0; i < 5; i++) dropDelay[i] = 6 + i * 4;
+			break;
+
+		// Right to Left
+		case 1:
+			for (int i = 0; i < 5; i++) dropDelay[i] = 6 + (4-i) * 4;
+			break;
+
+		// V-Shape (\/)
+		case 2:
+			dropDelay[2] = 8;
+			for (int i = 1; i <= 2; i++) {
+				dropDelay[2+i] = 8+(i*3);
+				dropDelay[2-i] = 8+(i*3);
+			}
+			break;
+
+		// Inverted V-Shape (/\)
+		case 3:
+		default:
+			dropDelay[2] = 14;
+			for (int i = 1; i <= 2; i++) {
+				dropDelay[2+i] = 14-(i*3);
+				dropDelay[2-i] = 14-(i*3);
+			}
+			break;
+	}
+	dropDown = false;
 
 	titleboxXpos[0] = ms().cursorPosition[0] * titleboxXspacing;
 	titleboxXdest[0] = ms().cursorPosition[0] * titleboxXspacing;
@@ -1508,8 +1563,8 @@ void graphicsInit() {
 	titlewindowXpos[1] = ms().cursorPosition[1] * 5;
 	titlewindowXdest[1] = ms().cursorPosition[1] * 5;
 
-	SetBrightness(0, (ms().theme == 4 || ms().theme == 5) ? -31 : 31);
-	SetBrightness(1, (ms().theme == 4 || ms().theme == 5) && !ms().macroMode ? -31 : 31);
+	SetBrightness(0, (ms().theme == TWLSettings::EThemeSaturn || ms().theme == TWLSettings::EThemeHBL) ? -31 : 31);
+	SetBrightness(1, (ms().theme == TWLSettings::EThemeSaturn || ms().theme == TWLSettings::EThemeHBL) && !ms().macroMode ? -31 : 31);
 
 	// videoSetup() Called here before.
 	// REG_BLDCNT = BLEND_SRC_BG3 | BLEND_FADE_BLACK;
@@ -1519,7 +1574,7 @@ void graphicsInit() {
 	bubbleYpos = tc().bubbleTipRenderY();
 	bubbleXpos = tc().bubbleTipRenderX();
 
-	if (ms().theme == 1) {
+	if (ms().theme == TWLSettings::ETheme3DS) {
 		//tex().load3DSTheme();
 		rocketVideo_videoYpos = tc().rotatingCubesRenderY();
 	}
@@ -1530,7 +1585,7 @@ void graphicsInit() {
 	bottomBgLoad(false, true);
 	// consoleDemoInit();
 
-	if (ms().theme != 4 && ms().theme != 5) {
+	if (ms().theme != TWLSettings::EThemeSaturn && ms().theme != TWLSettings::EThemeHBL) {
 		tex().drawProfileName();
 	}
 
@@ -1538,18 +1593,17 @@ void graphicsInit() {
 	drawCurrentTime();
 
 	// printf("drawn bgload");
-	// while(1) {}
-	if (!ms().macroMode && tc().renderPhoto()) {
+	// while (1) {}
+	if (!ms().macroMode && ms().showPhoto && tc().renderPhoto()) {
 		srand(time(NULL));
 		loadPhotoList();
 	}
 
-	if (ms().theme == 5) {
+	if (ms().theme == TWLSettings::EThemeHBL) {
 		u16* newPalette = (u16*)bubblesPal;
-		if (ms().colorMode == 1) {
-			// Convert palette to grayscale
+		if (colorTable) {
 			for (int i2 = 0; i2 < 6; i2++) {
-				*(newPalette+i2) = convertVramColorToGrayscale(*(newPalette+i2));
+				*(newPalette+i2) = colorTable[*(newPalette+i2)];
 			}
 		}
 

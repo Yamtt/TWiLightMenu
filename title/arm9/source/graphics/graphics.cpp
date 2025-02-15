@@ -22,11 +22,13 @@
 #include <nds/dma.h>
 #include <maxmod9.h>
 #include "bios_decompress_callback.h"
-#include "common/dsimenusettings.h"
+#include "common/twlmenusettings.h"
 #include "common/systemdetails.h"
 #include "common/gl2d.h"
+#include "common/tonccpy.h"
 #include "graphics.h"
-#include "lodepng.h"
+// #include "common/ColorLut.h"
+#include "common/lodepng.h"
 
 #define CONSOLE_SCREEN_WIDTH 32
 #define CONSOLE_SCREEN_HEIGHT 24
@@ -47,7 +49,7 @@ bool secondBuffer = false;
 
 u16 frameBuffer[2][256*192];
 u16 frameBufferBot[2][256*192];
-u16* dsiSplashLocation = (u16*)0x02600000;
+u16* colorTable = NULL;
 
 // Ported from PAlib (obsolete)
 void SetBrightness(u8 screen, s8 bright) {
@@ -61,36 +63,7 @@ void SetBrightness(u8 screen, s8 bright) {
 	*(u16*)(0x0400006C + (0x1000 * screen)) = bright + mode;
 }
 
-u16 convertToDsBmp(u16 val) {
-	if (ms().colorMode == 1) {
-		u16 newVal = ((val>>10)&31) | (val&31<<5) | (val&31)<<10 | BIT(15);
-
-		u8 b,g,r,max,min;
-		b = ((newVal)>>10)&31;
-		g = ((newVal)>>5)&31;
-		r = (newVal)&31;
-		// Value decomposition of hsv
-		max = (b > g) ? b : g;
-		max = (max > r) ? max : r;
-
-		// Desaturate
-		min = (b < g) ? b : g;
-		min = (min < r) ? min : r;
-		max = (max + min) / 2;
-		
-		newVal = 32768|(max<<10)|(max<<5)|(max);
-
-		b = ((newVal)>>10)&(31-6*ms().blfLevel);
-		g = ((newVal)>>5)&(31-3*ms().blfLevel);
-		r = (newVal)&31;
-
-		return 32768|(b<<10)|(g<<5)|(r);
-	} else {
-		return ((val>>10)&31) | (val&(31-3*ms().blfLevel)<<5) | (val&(31-6*ms().blfLevel))<<10 | BIT(15);
-	}
-}
-
-u16 convertVramColorToGrayscale(u16 val) {
+/* u16 convertVramColorToGrayscale(u16 val) {
 	u8 b,g,r,max,min;
 	b = ((val)>>10)&31;
 	g = ((val)>>5)&31;
@@ -105,10 +78,10 @@ u16 convertVramColorToGrayscale(u16 val) {
 	max = (max + min) / 2;
 
 	return 32768|(max<<10)|(max<<5)|(max);
-}
+} */
 
 void vBlankHandler() {
-	if(fadeType == true) {
+	if (fadeType) {
 		screenBrightness--;
 		if (screenBrightness < 0) screenBrightness = 0;
 	} else {
@@ -124,9 +97,6 @@ void vBlankHandler() {
 		dmaCopyWordsAsynch(1, frameBufferBot[secondBuffer], BG_GFX_SUB, 0x18000);
 		secondBuffer = !secondBuffer;
 	}
-	if (twlMenuSplash) {
-		twlMenuVideo_topGraphicRender();
-	}
 }
 
 void LoadBMP(void) {
@@ -136,9 +106,9 @@ void LoadBMP(void) {
 	std::vector<unsigned char> image;
 	unsigned width, height;
 
-	lodepng::decode(image, width, height, (sys().isDSPhat() ? "nitro:/graphics/logoPhat_rocketrobz.png" : "nitro:/graphics/logo_rocketrobz.png"));
+	lodepng::decode(image, width, height, ms().rocketRobzLogo ? (sys().isDSPhat() ? "nitro:/graphics/logoPhat_rocketrobz.png" : "nitro:/graphics/logo_rocketrobz.png") : "nitro:/graphics/logo_rocketrobzHide.png");
 	bool alternatePixel = false;
-	for(unsigned i=0;i<image.size()/4;i++) {
+	for (unsigned i=0;i<image.size()/4;i++) {
 		image[(i*4)+3] = 0;
 		if (alternatePixel) {
 			if (image[(i*4)] >= 0x4) {
@@ -155,9 +125,6 @@ void LoadBMP(void) {
 			}
 		}
 		u16 color = image[i*4]>>3 | (image[(i*4)+1]>>3)<<5 | (image[(i*4)+2]>>3)<<10 | BIT(15);
-		if (ms().colorMode == 1) {
-			color = convertVramColorToGrayscale(color);
-		}
 		if (ms().macroMode) {
 			frameBuffer[0][i] = color;
 		} else {
@@ -185,9 +152,6 @@ void LoadBMP(void) {
 			}
 		}
 		color = image[i*4]>>3 | (image[(i*4)+1]>>3)<<5 | (image[(i*4)+2]>>3)<<10 | BIT(15);
-		if (ms().colorMode == 1) {
-			color = convertVramColorToGrayscale(color);
-		}
 		if (ms().macroMode) {
 			frameBuffer[1][i] = color;
 		} else {
@@ -197,18 +161,29 @@ void LoadBMP(void) {
 		alternatePixel = !alternatePixel;
 	}
 	image.clear();
+	if (colorTable) {
+		if (ms().macroMode) {
+			for (int i=0; i<256*192; i++) {
+				frameBuffer[0][i] = colorTable[frameBuffer[0][i]];
+				frameBuffer[1][i] = colorTable[frameBuffer[1][i]];
+			}
+		} else {
+			for (int i=0; i<256*192; i++) {
+				frameBufferBot[0][i] = colorTable[frameBufferBot[0][i]];
+				frameBufferBot[1][i] = colorTable[frameBufferBot[1][i]];
+			}
+		}
+	}
 	doubleBuffer = true;
 	if (ms().macroMode) {
 		fadeType = true;
-		for (int i = 0; i < 60 * 3; i++)
-		{
+		for (int i = 0; i < 60 * 3; i++) {
 			scanKeys();
 			if ((keysHeld() & KEY_START) || (keysHeld() & KEY_SELECT) || (keysHeld() & KEY_TOUCH)) break;
 			swiWaitForVBlank();
 		}
 		fadeType = false;
-		for (int i = 0; i < 25; i++)
-		{
+		for (int i = 0; i < 25; i++) {
 			swiWaitForVBlank();
 		}
 		doubleBuffer = false;
@@ -247,15 +222,6 @@ void loadTitleGraphics() {
 	videoSetMode(MODE_5_3D | DISPLAY_BG3_ACTIVE);
 	videoSetModeSub(MODE_3_2D | DISPLAY_BG3_ACTIVE);
 
-	// Initialize gl2d
-	glScreen2D();
-	// Make gl2d render on transparent stage.
-	glClearColor(31,31,31,0);
-	glDisable(GL_CLEAR_BMP);
-
-	// Clear the GL texture state
-	glResetTextures();
-
 	// sprites
 	vramSetBankA(VRAM_A_TEXTURE);
 	vramSetBankB(VRAM_B_TEXTURE);
@@ -263,7 +229,7 @@ void loadTitleGraphics() {
 	vramSetBankD(VRAM_D_MAIN_BG_0x06000000);
 	vramSetBankE(VRAM_E_TEX_PALETTE);
 	vramSetBankF(VRAM_F_TEX_PALETTE_SLOT4);
-	vramSetBankG(VRAM_G_TEX_PALETTE_SLOT5); // 16Kb of palette ram, and font textures take up 8*16 bytes.
+	vramSetBankG(VRAM_G_MAIN_SPRITE);
 	vramSetBankH(VRAM_H_SUB_BG_EXT_PALETTE);
 	vramSetBankI(VRAM_I_SUB_SPRITE_EXT_PALETTE);
 
@@ -285,14 +251,12 @@ void loadTitleGraphics() {
 	REG_BG3PC_SUB = 0;
 	REG_BG3PD_SUB = 1<<8;
 
-	twlMenuVideo_loadTopGraphics();
-
 	// Clear the background palettes
-	for(int i = 0; i < 0xFF; i++) {
-		BG_PALETTE[i] = 0;
-		BG_PALETTE_SUB[i] = 0;
-	}
+	toncset16(BG_PALETTE, 0, 256);
+	toncset16(BG_PALETTE_SUB, 0, 256);
 
 	// Display TWiLightMenu++ logo
 	LoadBMP();
+
+	twlMenuVideo_loadTopGraphics();
 }

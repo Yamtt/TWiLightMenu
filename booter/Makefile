@@ -7,6 +7,20 @@ ifeq ($(strip $(DEVKITARM)),)
 $(error "Please set DEVKITARM in your environment. export DEVKITARM=<path to>devkitARM")
 endif
 
+ifeq ($(strip $(PROJECT)),)
+export PROJECT	:=	$(CURDIR)/../
+endif
+
+ifneq (,$(shell which python3))
+PYTHON	:= python3
+else ifneq (,$(shell which python2))
+PYTHON	:= python2
+else ifneq (,$(shell which python))
+PYTHON	:= python
+else
+$(error "Python not found in PATH, please install it.")
+endif
+
 include $(DEVKITARM)/ds_rules
 
 export VERSION_MAJOR	:= 7
@@ -42,7 +56,7 @@ CFLAGS	:=	-g -Wall -O2 \
 		$(ARCH)
 
 CFLAGS	+=	$(INCLUDE) -DARM9
-CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=c++11
+CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++17
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=ds_arm9.specs -g -Wl,--gc-sections $(ARCH) -Wl,-Map,$(notdir $*.map)
@@ -118,32 +132,33 @@ endif
  
 export GAME_TITLE := $(TARGET)
 
-.PHONY: bootloader bootstub arm7/$(TARGET).elf arm9/$(TARGET).elf $(TARGET).nds $(TARGET)_rungame.nds clean
+.PHONY: bootloader bootstub arm7/$(TARGET).elf arm9/$(TARGET).elf $(TARGET).nds clean
 
-all:	bootloader bootstub arm7/$(TARGET).elf arm9/$(TARGET).elf $(TARGET).nds $(TARGET)_rungame.nds
+all:	bootloader bootstub arm7/$(TARGET).elf arm9/$(TARGET).elf $(TARGET).nds
 
 dist:	all
 	@mkdir -p ../7zfile/debug
 	@mkdir -p "../7zfile/DSi&3DS - SD card users"
 	@cp "$(TARGET).nds" "../7zfile/DSi&3DS - SD card users/BOOT.NDS"
 	@mkdir -p "../7zfile/DSi - CFW users/SDNAND root/title/00030004/53524c41/content"
-	@mkdir -p "../7zfile/DSi - CFW users/SDNAND root/title/00030015/534c524e/content"
+	#@mkdir -p "../7zfile/DSi - CFW users/SDNAND root/title/00030015/534c524e/content"
 	@cp $(TARGET).nds "../7zfile/DSi - CFW users/SDNAND root/title/00030004/53524c41/content/00000000.app"
-	@cp $(TARGET)_rungame.nds "../7zfile/DSi - CFW users/SDNAND root/title/00030015/534c524e/content/00000000.app"
+	#@cp $(TARGET)_rungame.nds "../7zfile/DSi - CFW users/SDNAND root/title/00030015/534c524e/content/00000000.app"
 	@cp $(TARGET).arm7.elf ../7zfile/debug/$(TARGET).arm7.elf
 	@cp $(TARGET).arm9.elf ../7zfile/debug/$(TARGET).arm9.elf
 
 $(TARGET).nds:	$(TARGET).arm7 $(TARGET).arm9
-	ndstool	-c $(TARGET).nds -7 $(TARGET).arm7.elf -9 $(TARGET).arm9.elf \
+	ndstool	-c $@ -7 $(TARGET).arm7.elf -9 $(TARGET).arm9.elf \
 			-g SRLA 01 "TWLMENUPP" -z 80040000 -u 00030004 -a 00000138 -b icon.bmp "TWiLight Menu++;Rocket Robz"
+	$(PYTHON) animatedbannerpatch.py $@ twl_banner.bin
 
-$(TARGET)_rungame.nds:	$(TARGET).arm7 $(TARGET).arm9
-	ndstool	-c $(TARGET)_rungame.nds -7 $(TARGET).arm7.elf -9 $(TARGET).arm9.elf \
-			-g SLRN 01 "TWLMENUPP-LR" -z 80040000 -u 00030015 -a 00000138 -b icon.bmp "TWiLight Menu++;Last-run ROM;Rocket Robz"
+#$(TARGET)_rungame.nds:	$(TARGET).arm7 $(TARGET).arm9
+#	ndstool	-c $@ -7 $(TARGET).arm7.elf -9 $(TARGET).arm9.elf \
+#			-g SLRN 01 "TWLMENUPP-LR" -z 80040000 -u 00030015 -a 00000138 -b icon.bmp "Last-run ROM;TWiLight Menu++;Rocket Robz"
 
 ifneq ($(strip $(TWLNOPATCHSRLHEADER)), 1)
-		python2 ../patch_ndsheader_dsiware.py $(TARGET).nds --twlTouch
-		python2 ../patch_ndsheader_dsiware.py $(TARGET)_rungame.nds --twlTouch
+		$(PYTHON) ../patch_ndsheader_dsiware.py $(TARGET).nds --twlTouch --structParam
+#		$(PYTHON) ../patch_ndsheader_dsiware.py $(TARGET)_rungame.nds --twlTouch --structParam
 endif
 
 $(TARGET).arm7: arm7/$(TARGET).elf
@@ -172,7 +187,7 @@ clean:
 	@rm -fr $(TARGET).arm7.elf
 	@rm -fr $(TARGET).arm9.elf
 	@$(MAKE) -C bootloader clean
-	@$(MAKE) -C bootstub clean
+	@$(MAKE) -C $(PROJECT)/universal/bootstub clean
 	@$(MAKE) -C arm9 clean
 	@$(MAKE) -C arm7 clean
 
@@ -183,7 +198,7 @@ bootloader: data
 	@$(MAKE) -C bootloader
 
 bootstub: data
-	@$(MAKE) -C bootstub
+	@$(MAKE) -C $(PROJECT)/universal/bootstub BOOTSTUB=$(CURDIR)/data/bootstub.bin
 
 #---------------------------------------------------------------------------------
 else

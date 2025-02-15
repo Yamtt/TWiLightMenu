@@ -1,5 +1,5 @@
 #include "pergamesettings.h"
-#include "dsimenusettings.h"
+#include "common/twlmenusettings.h"
 #include <vector>
 #include <algorithm>
 #include <unistd.h>
@@ -11,7 +11,7 @@
 #include <nds.h>
 
 #include "myDSiMode.h"
-#include "inifile.h"
+#include "common/inifile.h"
 
 bool perGameSettings_directBoot = false;	// Homebrew only
 int perGameSettings_dsiMode = -1;
@@ -23,10 +23,10 @@ int perGameSettings_boostCpu = -1;
 int perGameSettings_boostVram = -1;
 int perGameSettings_cardReadDMA = -1;
 int perGameSettings_asyncCardRead = -1;
-int perGameSettings_swiHaltHook = -1;
 int perGameSettings_bootstrapFile = -1;
 int perGameSettings_wideScreen = -1;
-int perGameSettings_expandRomSpace = -1;
+int perGameSettings_dsiwareBooter = -1;
+int perGameSettings_useBootstrap = -1;
 
 char pergamefilepath[256];
 
@@ -42,14 +42,14 @@ void loadPerGameSettings (std::string filename) {
 	perGameSettings_boostVram = pergameini.GetInt("GAMESETTINGS", "BOOST_VRAM", -1);
 	perGameSettings_cardReadDMA = pergameini.GetInt("GAMESETTINGS", "CARD_READ_DMA", -1);
 	perGameSettings_asyncCardRead = pergameini.GetInt("GAMESETTINGS", "ASYNC_CARD_READ", -1);
-	perGameSettings_swiHaltHook = pergameini.GetInt("GAMESETTINGS", "SWI_HALT_HOOK", -1);
 	perGameSettings_bootstrapFile = pergameini.GetInt("GAMESETTINGS", "BOOTSTRAP_FILE", -1);
 	perGameSettings_wideScreen = pergameini.GetInt("GAMESETTINGS", "WIDESCREEN", -1);
-	perGameSettings_expandRomSpace = pergameini.GetInt("GAMESETTINGS", "EXTENDED_MEMORY", -1);
+	perGameSettings_dsiwareBooter = pergameini.GetInt("GAMESETTINGS", "DSIWARE_BOOTER", -1);
+	perGameSettings_useBootstrap = pergameini.GetInt("GAMESETTINGS", "USE_BOOTSTRAP", -1);
 }
 
 std::string getSavExtension(void) {
-	if (perGameSettings_saveNo == 0) {
+	if (ms().saveLocation == TWLSettings::EGamesFolder || perGameSettings_saveNo == 0) {
 		return ".sav";
 	} else {
 		return ".sav" + std::to_string(perGameSettings_saveNo);
@@ -57,7 +57,7 @@ std::string getSavExtension(void) {
 }
 
 std::string getPubExtension(void) {
-	if (perGameSettings_saveNo == 0) {
+	if (ms().saveLocation == TWLSettings::EGamesFolder || perGameSettings_saveNo == 0) {
 		return ".pub";
 	} else {
 		return ".pu" + std::to_string(perGameSettings_saveNo);
@@ -65,7 +65,7 @@ std::string getPubExtension(void) {
 }
 
 std::string getPrvExtension(void) {
-	if (perGameSettings_saveNo == 0) {
+	if (ms().saveLocation == TWLSettings::EGamesFolder || perGameSettings_saveNo == 0) {
 		return ".prv";
 	} else {
 		return ".pr" + std::to_string(perGameSettings_saveNo);

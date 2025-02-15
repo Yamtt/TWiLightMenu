@@ -1,6 +1,6 @@
 #include "sound.h"
 
-#include "common/dsimenusettings.h"
+#include "common/twlmenusettings.h"
 #include "common/flashcard.h"
 #include "common/systemdetails.h"
 #include "streamingaudio.h"
@@ -10,6 +10,50 @@
 #include <sys/stat.h>
 
 #include "soundbank.h"
+
+static inline const char* sm64dsReleaseDate(void) {
+	using TRegion = TWLSettings::TRegion;
+	int gameRegion = ms().getGameRegion();
+
+	if (gameRegion == TRegion::ERegionKorea) {
+		return "07/26";
+	} else if (gameRegion == TRegion::ERegionChina) {
+		return "06/21";
+	} else if (gameRegion == TRegion::ERegionAustralia) {
+		return "02/24";
+	} else if (gameRegion == TRegion::ERegionEurope) {
+		return "03/11";
+	} else if (gameRegion == TRegion::ERegionUSA) {
+		return "11/21";
+	}
+	return "12/02"; // Japan
+}
+
+static inline const char* styleSavvyReleaseDate(void) {
+	using TRegion = TWLSettings::TRegion;
+	int gameRegion = ms().getGameRegion();
+
+	if (gameRegion == TRegion::ERegionKorea) {
+		return "09/06";
+	} else if (gameRegion == TRegion::ERegionAustralia) {
+		return "11/19";
+	} else if (gameRegion == TRegion::ERegionUSA) {
+		return "11/02";
+	}
+	return "10/23"; // Japan
+}
+
+static inline const char* sonic1ReleaseDate(void) {
+	using TRegion = TWLSettings::TRegion;
+	int gameRegion = ms().getGameRegion();
+
+	if (gameRegion == TRegion::ERegionEurope || gameRegion == TRegion::ERegionAustralia) {
+		return "06/21";
+	} else if (gameRegion == TRegion::ERegionUSA) {
+		return "06/23";
+	}
+	return "07/26"; // Japan
+}
 
 
 // Reference: http://yannesposito.com/Scratch/en/blog/2010-10-14-Fun-with-wav/
@@ -62,7 +106,7 @@ SoundControl::SoundControl()
 	extern bool useTwlCfg;
 	int birthMonth = (useTwlCfg ? *(u8*)0x02000446 : PersonalData->birthMonth);
 	int birthDay = (useTwlCfg ? *(u8*)0x02000447 : PersonalData->birthDay);
-	char soundBankPath[32], currentDate[16], birthDate[16];
+	char soundBankPath[32], wavPath[32], currentDate[16], birthDate[16];
 	time_t Raw;
 	time(&Raw);
 	const struct tm *Time = localtime(&Raw);
@@ -72,6 +116,25 @@ SoundControl::SoundControl()
 
 	sprintf(soundBankPath, "nitro:/soundbank%s.bin", (strcmp(currentDate, birthDate) == 0) ? "_bday" : "");
 
+	if (strcmp(currentDate, styleSavvyReleaseDate()) == 0) {
+		// Load Style Savvy title theme
+		sprintf(wavPath, "nitro:/sound/fashion.wav");
+	} else if (strcmp(currentDate, sm64dsReleaseDate()) == 0) {
+		// Load Mario 64 coin sound
+		sprintf(wavPath, "nitro:/sound/coin64.wav");
+	} else if (strcmp(currentDate, sonic1ReleaseDate()) == 0) {
+		// Load Sonic 1 extra life sound
+		sprintf(wavPath, "nitro:/sound/sonic.wav");
+	} else if (strcmp(currentDate, "03/10") == 0) {
+		// Load Mario coin sound for MAR10 Day
+		sprintf(wavPath, "nitro:/sound/coin.wav");
+	} else if (strcmp(currentDate, "04/27") == 0) {
+		// Load Kirby dance jingle for Kirby's anniversary
+		sprintf(wavPath, ms().longSplashJingle ? "nitro:/sound/kirbyLong.wav" : "nitro:/sound/kirby.wav");
+	} else {
+		sprintf(wavPath, ms().longSplashJingle ? "nitro:/sound/titleLong.wav" : "nitro:/sound/title.wav");
+	}
+
 	// Load sound bank into memory
 	FILE* soundBankF = fopen(soundBankPath, "rb");
 	fread(soundBank, 1, sizeof(soundBank), soundBankF);
@@ -79,10 +142,11 @@ SoundControl::SoundControl()
 
 	mmInitDefaultMem((mm_addr)soundBank);
 
-	mmLoadEffect( sys().isRegularDS() ? SFX_DSBOOT : SFX_DSIBOOT );
+	const bool regularDS = (sys().isRegularDS() && !ms().oppositeSplash) || (!sys().isRegularDS() && ms().oppositeSplash);
+	mmLoadEffect( (regularDS || ms().macroMode) ? SFX_DSBOOT : SFX_DSIBOOT );
 	mmLoadEffect( SFX_SELECT );
 
-	if (sys().isRegularDS()) {
+	if (regularDS || ms().macroMode) {
 		snd_dsiboot = {
 			{ SFX_DSBOOT } ,			// id
 			(int)(1.0f * (1<<10)),	// rate
@@ -109,7 +173,7 @@ SoundControl::SoundControl()
 	};
 
 
-	stream_source = fopen("nitro:/title.wav", "rb");
+	stream_source = fopen(wavPath, "rb");
 
 
 	WavHeader wavHeader;
@@ -148,7 +212,7 @@ void SoundControl::stopStream() {
 
 void SoundControl::fadeOutStream() {
 	//fade_out = true; // Bugged
-	fifoSendValue32(FIFO_USER_02, 1); // Fade out on ARM7 side
+	fifoSendValue32(FIFO_USER_01, 1); // Fade out on ARM7 side
 }
 
 void SoundControl::cancelFadeOutStream() {

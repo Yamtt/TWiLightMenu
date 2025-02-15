@@ -24,15 +24,18 @@ public:
     FILE* bsVerFile;
     for (int i = 0; i < 2; i++) {
       if (i == 1) {
-        bsVerFile = fopen("/_nds/TWiLightMenu/nightly-bootstrap.ver", "rb");
+        bsVerFile = fopen("/_nds/nightly-bootstrap.ver", "rb");
       } else {
-        bsVerFile = fopen("/_nds/TWiLightMenu/release-bootstrap.ver", "rb");
+        bsVerFile = fopen("/_nds/release-bootstrap.ver", "rb");
       }
       if (bsVerFile) {
-        fseek(bsVerFile, 0, SEEK_END);
-        uint len = ftell(bsVerFile);
-        fseek(bsVerFile, 0, SEEK_SET);
-        fread(bsVerText[i], 1, std::max(len, sizeof(bsVerText[i]) - 1), bsVerFile);
+		uint len = 7;
+		if (i == 0) {
+			fseek(bsVerFile, 0, SEEK_END);
+			len = ftell(bsVerFile);
+			fseek(bsVerFile, 0, SEEK_SET);
+		}
+        fread(bsVerText[i], 1, (i == 1) ? len : std::max(len, sizeof(bsVerText[i]) - 1), bsVerFile);
       } else {
         snprintf(bsVerText[i], sizeof(bsVerText[i]), "%s", "No version available");
       }

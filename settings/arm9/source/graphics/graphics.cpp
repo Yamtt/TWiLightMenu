@@ -1,7 +1,9 @@
 #include "graphics.h"
 #include <nds.h>
 
-#include "common/dsimenusettings.h"
+#include "common/fileCopy.h"
+#include "common/twlmenusettings.h"
+#include "common/systemdetails.h"
 #include "common/tonccpy.h"
 #include "fontHandler.h"
 
@@ -17,10 +19,13 @@ bool lcdSwapped = false;
 extern int currentTheme;
 extern bool currentMacroMode;
 
-int frameOf60fps = 60;
 int frameDelay = 0;
 bool frameDelayEven = true; // For 24FPS
-bool renderFrame = true;
+u16* colorTable = NULL;
+
+bool screenFadedIn(void) { return (screenBrightness == 0); }
+
+bool screenFadedOut(void) { return (screenBrightness > 24); }
 
 // Ported from PAlib (obsolete)
 void SetBrightness(u8 screen, s8 bright) {
@@ -34,54 +39,7 @@ void SetBrightness(u8 screen, s8 bright) {
 	*(u16*)(0x0400006C + (0x1000 * screen)) = bright + mode;
 }
 
-void frameRateHandler(void) {
-	frameOf60fps++;
-	if (frameOf60fps > 60) frameOf60fps = 1;
-
-	if (!renderFrame) {
-		frameDelay++;
-		switch (ms().fps) {
-			case 11:
-				renderFrame = (frameDelay == 5+frameDelayEven);
-				break;
-			case 24:
-			//case 25:
-				renderFrame = (frameDelay == 2+frameDelayEven);
-				break;
-			case 48:
-				renderFrame = (frameOf60fps != 3
-							&& frameOf60fps != 8
-							&& frameOf60fps != 13
-							&& frameOf60fps != 18
-							&& frameOf60fps != 23
-							&& frameOf60fps != 28
-							&& frameOf60fps != 33
-							&& frameOf60fps != 38
-							&& frameOf60fps != 43
-							&& frameOf60fps != 48
-							&& frameOf60fps != 53
-							&& frameOf60fps != 58);
-				break;
-			case 50:
-				renderFrame = (frameOf60fps != 3
-							&& frameOf60fps != 9
-							&& frameOf60fps != 16
-							&& frameOf60fps != 22
-							&& frameOf60fps != 28
-							&& frameOf60fps != 34
-							&& frameOf60fps != 40
-							&& frameOf60fps != 46
-							&& frameOf60fps != 51
-							&& frameOf60fps != 58);
-				break;
-			default:
-				renderFrame = (frameDelay == 60/ms().fps);
-				break;
-		}
-	}
-}
-
-u16 convertVramColorToGrayscale(u16 val) {
+/* u16 convertVramColorToGrayscale(u16 val) {
 	u8 b,g,r,max,min;
 	b = ((val)>>10)&31;
 	g = ((val)>>5)&31;
@@ -96,13 +54,13 @@ u16 convertVramColorToGrayscale(u16 val) {
 	max = (max + min) / 2;
 
 	return 32768|(max<<10)|(max<<5)|(max);
-}
+} */
 
 // Copys a palette and applies filtering if enabled
 void copyPalette(u16 *dst, const u16 *src, int size) {
-	if(ms().colorMode == 1) { // Grayscale
-		for(int i = 0; i < size; i++) {
-			dst[i] = convertVramColorToGrayscale(src[i]);
+	if (colorTable) {
+		for (int i = 0; i < size; i++) {
+			dst[i] = colorTable[src[i]];
 		}
 	} else {
 		tonccpy(dst, src, size);
@@ -121,7 +79,7 @@ void drawScroller(int y, int h, bool onLeft) {
 	const u8 scroller[4] = {2, 3, 3, 2};
 	u8 *dst = (u8*)bgGetGfxPtr(7) + (onLeft ? 2 : 250);
 	toncset16(dst + y * 256, 2 | 2 << 8, 2);
-	for(int i = 1; i < h - 1; i++) {
+	for (int i = 1; i < h - 1; i++) {
 		tonccpy(dst + (y + i) * 256, scroller, sizeof(scroller));
 	}
 	toncset16(dst + (y + h - 1) * 256, 2 | 2 << 8, 2);
@@ -129,30 +87,19 @@ void drawScroller(int y, int h, bool onLeft) {
 
 void vBlankHandler()
 {
-	if(fadeType == true) {
+	if (fadeType) {
 		screenBrightness--;
 		if (screenBrightness < 0) screenBrightness = 0;
 	} else {
 		screenBrightness++;
 		if (screenBrightness > 31) screenBrightness = 31;
 	}
-	if (renderFrame) {
-		if (currentMacroMode) {
-			SetBrightness(0, lcdSwapped ? (currentTheme == 4 ? -screenBrightness : screenBrightness) : (currentTheme == 4 ? -31 : 31));
-			SetBrightness(1, !lcdSwapped ? (currentTheme == 4 ? -screenBrightness : screenBrightness) : (currentTheme == 4 ? -31 : 31));
-		} else {
-			SetBrightness(0, currentTheme == 4 ? -screenBrightness : screenBrightness);
-			SetBrightness(1, currentTheme == 4 ? -screenBrightness : screenBrightness);
-		}
-	}
-
-	updateText(false);
-	updateText(true);
-
-	if (renderFrame) {
-		frameDelay = 0;
-		frameDelayEven = !frameDelayEven;
-		renderFrame = false;
+	if (currentMacroMode) {
+		SetBrightness(0, lcdSwapped ? (currentTheme == 4 ? -screenBrightness : screenBrightness) : (currentTheme == 4 ? -31 : 31));
+		SetBrightness(1, !lcdSwapped ? (currentTheme == 4 ? -screenBrightness : screenBrightness) : (currentTheme == 4 ? -31 : 31));
+	} else {
+		SetBrightness(0, currentTheme == 4 ? -screenBrightness : screenBrightness);
+		SetBrightness(1, currentTheme == 4 ? -screenBrightness : screenBrightness);
 	}
 }
 
@@ -163,6 +110,19 @@ void graphicsInit() {
 	SetBrightness(1, currentTheme == 4 && !ms().macroMode ? -31 : 31);
 	if (ms().macroMode) {
 		powerOff(PM_BACKLIGHT_TOP);
+	}
+
+	if (ms().colorMode != "Default") {
+		char colorTablePath[256];
+		sprintf(colorTablePath, "%s:/_nds/colorLut/%s.lut", (sys().isRunFromSD() ? "sd" : "fat"), ms().colorMode.c_str());
+
+		if (getFileSize(colorTablePath) == 0x20000) {
+			colorTable = new u16[0x20000/sizeof(u16)];
+
+			FILE* file = fopen(colorTablePath, "rb");
+			fread(colorTable, 1, 0x20000, file);
+			fclose(file);
+		}
 	}
 
 	videoSetMode(MODE_5_2D | DISPLAY_BG3_ACTIVE);
@@ -183,7 +143,7 @@ void graphicsInit() {
 	int bg2Sub = bgInitSub(2, BgType_Bmp8, BgSize_B8_256x256, 3, 0);
 	bgSetPriority(bg2Sub, 0);
 
-	if(currentTheme != 4) {
+	if (currentTheme != 4) {
 		tonccpy(bgGetGfxPtr(bg3Main), (/*widescreenEffects ? top_bg_wideBitmap :*/ top_bgBitmap), (/*widescreenEffects ? top_bg_wideBitmapLen :*/ top_bgBitmapLen));
 		copyPalette(BG_PALETTE + 0x10, (/*widescreenEffects ? top_bg_widePal :*/ top_bgPal), (/*widescreenEffects ? top_bg_widePalLen :*/ top_bgPalLen));
 		tonccpy(bgGetGfxPtr(bg3Sub), sub_bgBitmap, sub_bgBitmapLen);
@@ -197,6 +157,4 @@ void graphicsInit() {
 
 	irqSet(IRQ_VBLANK, vBlankHandler);
 	irqEnable(IRQ_VBLANK);
-	irqSet(IRQ_VCOUNT, frameRateHandler);
-	irqEnable(IRQ_VCOUNT);
 }

@@ -3,6 +3,7 @@
 #define __DSIMENUPP_THEME_TEXTURES__
 #include <gl2d.h>
 #include "common/singleton.h"
+#include "FontGraphic.h"
 #include "Texture.h"
 #include <memory>
 #include <string>
@@ -12,8 +13,6 @@
 #define BG_BUFFER_PIXELCOUNT 256 * 192
 
 extern bool boxArtColorDeband;
-
-extern int boxArtType[40];
 
 using std::unique_ptr;
 using std::min;
@@ -38,9 +37,32 @@ private:
 	void loadVolumeTextures();
 	void loadBatteryTextures();
 	void loadUITextures();
-	void loadIconTextures();
 
 public:
+	void loadIconGBTexture();
+	void loadIconGBATexture();
+	void loadIconGGTexture();
+	void loadIconMDTexture();
+	void loadIconNESTexture();
+	void loadIconSGTexture();
+	void loadIconSMSTexture();
+	void loadIconSNESTexture();
+	void loadIconPLGTexture();
+	void loadIconA26Texture();
+	void loadIconCOLTexture();
+	void loadIconM5Texture();
+	void loadIconINTTexture();
+	void loadIconPCETexture();
+	void loadIconWSTexture();
+	void loadIconNGPTexture();
+	void loadIconCPCTexture();
+	void loadIconVIDTexture();
+	void loadIconIMGTexture();
+	void loadIconMSXTexture();
+	void loadIconMINITexture();
+	void loadIconHBTexture();
+	void loadIconUnknownTexture();
+
 	static unsigned short *beginBgSubModify();
 	static void commitBgSubModify();
 	static void commitBgSubModifyAsync();
@@ -50,15 +72,15 @@ public:
 	static void commitBgMainModifyAsync();
 
 	void drawTopBg();
-	void drawTopBgAvoidingShoulders();
 
 	void drawProfileName();
 	void resetProfileName();
 	void drawBottomBg(int bg);
 
 	void loadBoxArtToMem(const char *filename, int num);
-	void drawBoxArt(const char* filename);
-	void drawBoxArtFromMem(int num);
+	void drawBoxArt(const char* filename, bool inMem);
+	void drawOverBoxArt(uint photoWidth, uint photoHeight);
+	void drawOverRotatingCubes();
 
 	void drawVolumeImage(int volumeLevel);
 	void drawVolumeImageMacro(int volumeLevel);
@@ -71,13 +93,14 @@ public:
 	void resetCachedBatteryLevel();
 
 	void drawShoulders(bool LShoulderActive, bool RShoulderActive);
-	void drawDateTime(const char* date, int posX, int posY);
-	void drawDateTimeMacro(const char* date, int posX, int posY);
+	void drawDateTime(const char* date, int posX, int posY, bool isDate);
+	void drawDateTimeMacro(const char* date, int posX, int posY, bool isDate);
 
 	void clearTopScreen();
+	void unloadRotatingCubes();
 	static void videoSetup();
 private:
-	void applyGrayscaleToAllGrfTextures();
+	void applyUserPaletteToAllGrfTextures();
 
 	void loadBubbleImage(const Texture& tex, int sprW, int sprH);
 	void loadProgressImage(const Texture& tex);
@@ -101,9 +124,6 @@ private:
 	void loadWirelessIcons(const Texture& tex);
 
 	void loadBackgrounds();
-
-	static unsigned int getTopFontSpriteIndex(const u16 character);
-	static unsigned int getDateTimeFontSpriteIndex(const u16 character);
 
 	static int getVolumeLevel();
 	static int getBatteryLevel();
@@ -150,19 +170,32 @@ public:
 	const Texture *iconGGTexture() { return _iconGGTexture.get(); }
 	const Texture *iconMDTexture() { return _iconMDTexture.get(); }
 	const Texture *iconNESTexture() { return _iconNESTexture.get(); }
+	const Texture *iconSGTexture() { return _iconSGTexture.get(); }
 	const Texture *iconSMSTexture() { return _iconSMSTexture.get(); }
 	const Texture *iconSNESTexture() { return _iconSNESTexture.get(); }
 	const Texture *iconPLGTexture() { return _iconPLGTexture.get(); }
 	const Texture *iconA26Texture() { return _iconA26Texture.get(); }
+	const Texture *iconCOLTexture() { return _iconCOLTexture.get(); }
+	const Texture *iconM5Texture() { return _iconM5Texture.get(); }
 	const Texture *iconINTTexture() { return _iconINTTexture.get(); }
 	const Texture *iconPCETexture() { return _iconPCETexture.get(); }
+	const Texture *iconWSTexture() { return _iconWSTexture.get(); }
+	const Texture *iconNGPTexture() { return _iconNGPTexture.get(); }
+	const Texture *iconCPCTexture() { return _iconCPCTexture.get(); }
+	const Texture *iconVIDTexture() { return _iconVIDTexture.get(); }
+	const Texture *iconIMGTexture() { return _iconIMGTexture.get(); }
+	const Texture *iconMSXTexture() { return _iconMSXTexture.get(); }
+	const Texture *iconMINITexture() { return _iconMINITexture.get(); }
+	const Texture *iconHBTexture() { return _iconHBTexture.get(); }
 	const Texture *iconUnknownTexture() { return _iconUnknownTexture.get(); }
 
-	const Texture *dateTimeFontTexture() { return _dateTimeFontTexture.get(); }
 	const Texture *leftShoulderTexture() { return _leftShoulderTexture.get(); }
 	const Texture *rightShoulderTexture() { return _rightShoulderTexture.get(); }
 	const Texture *leftShoulderGreyedTexture() { return _leftShoulderGreyedTexture.get(); }
 	const Texture *rightShoulderGreyedTexture() { return _rightShoulderGreyedTexture.get(); }
+
+	FontGraphic *dateTimeFont() { return _dateTimeFont.get(); }
+	FontGraphic *usernameFont() { extern FontGraphic *smallFont; return _usernameFont ? _usernameFont.get() : smallFont; }
 
 	static u16* bmpImageBuffer();
 	static u16* bgSubBuffer2();
@@ -209,8 +242,7 @@ public:
 					return _battery0Texture.get();
 			}
 		} else {
-			switch (texture)
-			{
+			switch (texture) {
 				case 8:
 					return _batterychargeblinkTexture.get();
 				case 7:
@@ -225,8 +257,6 @@ public:
 	}
 
 private:
-	int previouslyDrawnBottomBg;
-
 	vector<Texture> _backgroundTextures;
 
 	unique_ptr<glImage[]> _progressImage;
@@ -277,12 +307,23 @@ private:
 	unique_ptr<Texture> _iconGGTexture;
 	unique_ptr<Texture> _iconMDTexture;
 	unique_ptr<Texture> _iconNESTexture;
+	unique_ptr<Texture> _iconSGTexture;
 	unique_ptr<Texture> _iconSMSTexture;
 	unique_ptr<Texture> _iconSNESTexture;
 	unique_ptr<Texture> _iconPLGTexture;
 	unique_ptr<Texture> _iconA26Texture;
+	unique_ptr<Texture> _iconCOLTexture;
+	unique_ptr<Texture> _iconM5Texture;
 	unique_ptr<Texture> _iconINTTexture;
 	unique_ptr<Texture> _iconPCETexture;
+	unique_ptr<Texture> _iconWSTexture;
+	unique_ptr<Texture> _iconNGPTexture;
+	unique_ptr<Texture> _iconCPCTexture;
+	unique_ptr<Texture> _iconVIDTexture;
+	unique_ptr<Texture> _iconIMGTexture;
+	unique_ptr<Texture> _iconMSXTexture;
+	unique_ptr<Texture> _iconMINITexture;
+	unique_ptr<Texture> _iconHBTexture;
 	unique_ptr<Texture> _iconUnknownTexture;
 
 	unique_ptr<Texture> _volume0Texture;
@@ -302,11 +343,13 @@ private:
 	unique_ptr<Texture> _batteryfullDSTexture;
 	unique_ptr<Texture> _batterylowTexture;
 
-	unique_ptr<Texture> _dateTimeFontTexture;
 	unique_ptr<Texture> _leftShoulderTexture;
 	unique_ptr<Texture> _rightShoulderTexture;
 	unique_ptr<Texture> _leftShoulderGreyedTexture;
 	unique_ptr<Texture> _rightShoulderGreyedTexture;
+
+	unique_ptr<FontGraphic> _dateTimeFont;
+	unique_ptr<FontGraphic> _usernameFont;
 
 private:
 	int bubbleTexID;
@@ -334,6 +377,8 @@ private:
 	int _cachedVolumeLevel;
 	int _cachedBatteryLevel;
 	bool _profileNameLoaded;
+	int _previousDateWidth = 0;
+	int _previousTimeWidth = 0;
 };
 
 

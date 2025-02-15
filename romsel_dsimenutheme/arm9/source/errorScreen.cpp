@@ -3,13 +3,16 @@
 #include <maxmod9.h>
 
 // #include "autoboot.h"
-#include "common/dsimenusettings.h"
+#include "common/twlmenusettings.h"
 #include "common/systemdetails.h"
+#include "common/flashcard.h"
 #include "common/tonccpy.h"
 #include "graphics/fontHandler.h"
 // #include "graphics/ThemeTextures.h"
 #include "language.h"
 #include "sound.h"
+
+extern u16* colorTable;
 
 extern const char *unlaunchAutoLoadID;
 extern char unlaunchDevicePath[256];
@@ -26,8 +29,8 @@ static bool showNonExtendedImage = false;
 void checkSdEject(void) {
 	if (!ms().sdRemoveDetect) return;
 
-	if (sys().sdStatus() == SystemDetails::ESDStatus::SDOk || !isDSiMode()) {
-		if(!showNonExtendedImage) {
+	if (sys().sdStatus() == SystemDetails::ESDStatus::SDOk || !isDSiMode() || !sdFound()) {
+		if (!showNonExtendedImage) {
 			timeTillChangeToNonExtendedImage++;
 			if (timeTillChangeToNonExtendedImage > 10) {
 				showNonExtendedImage = true;
@@ -59,12 +62,17 @@ void checkSdEject(void) {
 		0xD6B5,
 		0xFFFF,
 	};
+	if (colorTable) {
+		for (int i = 0; i < 4; i++) {
+			palette[i] = colorTable[palette[i]];
+		}
+	}
 	tonccpy(BG_PALETTE, palette, sizeof(palette));
 	tonccpy(BG_PALETTE_SUB, palette, sizeof(palette));
 
 	clearText();
 
-	if(showNonExtendedImage) {
+	if (showNonExtendedImage) {
 		printLarge(false, 0, 45, STR_SD_WAS_REMOVED, Alignment::center);
 		printLarge(false, 0, 75, STR_REINSERT_SD_CARD, Alignment::center);
 	} else {
@@ -74,7 +82,7 @@ void checkSdEject(void) {
 
 	updateText(false);
 
-	while(1) {
+	while (1) {
 		// Currently not working
 		/*scanKeys();
 		if (keysDown() & KEY_B) {

@@ -3,11 +3,11 @@
 
 off_t getFileSize(const char *fileName)
 {
-    FILE* fp = fopen(fileName, "rb");
-    off_t fsize = 0;
-    if (fp) {
-        fseek(fp, 0, SEEK_END);
-        fsize = ftell(fp);			// Get source file's size
+	FILE* fp = fopen(fileName, "rb");
+	off_t fsize = 0;
+	if (fp) {
+		fseek(fp, 0, SEEK_END);
+		fsize = ftell(fp);			// Get source file's size
 		fseek(fp, 0, SEEK_SET);
 	}
 	fclose(fp);
@@ -15,22 +15,28 @@ off_t getFileSize(const char *fileName)
 	return fsize;
 }
 
-char copyBuf[0x8000];
+char* copyBuf = (char*)NULL;
 
 int fcopy(const char *sourcePath, const char *destinationPath)
 {
-    FILE* sourceFile = fopen(sourcePath, "rb");
-    off_t fsize = 0;
-    if (sourceFile) {
-        fseek(sourceFile, 0, SEEK_END);
-        fsize = ftell(sourceFile);			// Get source file's size
+	static bool copyBufInited = false;
+	if (!copyBufInited) {
+		copyBuf = new char[0x100000];
+		copyBufInited = true;
+	}
+
+	FILE* sourceFile = fopen(sourcePath, "rb");
+	off_t fsize = 0;
+	if (sourceFile) {
+		fseek(sourceFile, 0, SEEK_END);
+		fsize = ftell(sourceFile);			// Get source file's size
 		fseek(sourceFile, 0, SEEK_SET);
 	} else {
 		fclose(sourceFile);
 		return 1;
 	}
 
-    FILE* destinationFile = fopen(destinationPath, "wb");
+	FILE* destinationFile = fopen(destinationPath, "wb");
 	if (!destinationFile) {
 		fclose(sourceFile);
 		fclose(destinationFile);
@@ -39,8 +45,7 @@ int fcopy(const char *sourcePath, const char *destinationPath)
 
 	off_t offset = 0;
 	int numr;
-	while (1)
-	{
+	while (1) {
 		/* scanKeys();
 		if (keysHeld() & KEY_A) {
 			// Cancel copying
@@ -51,15 +56,14 @@ int fcopy(const char *sourcePath, const char *destinationPath)
 		} */
 
 		// Copy file to destination path
-		numr = fread(copyBuf, 1, 0x8000, sourceFile);
+		numr = fread(copyBuf, 1, 0x100000, sourceFile);
 		fwrite(copyBuf, 1, numr, destinationFile);
-		offset += 0x8000;
+		offset += 0x100000;
 
 		if (offset > fsize) {
 			fclose(sourceFile);
 			fclose(destinationFile);
 			return 0;
-			break;
 		}
 	}
 

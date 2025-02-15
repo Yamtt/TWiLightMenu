@@ -1,5 +1,5 @@
-#include "graphics/lodepng.h"
-#include "tonccpy.h"
+#include "common/lodepng.h"
+#include "common/tonccpy.h"
 #include "gbaswitch.h"
 #include "nds_loader_arm9.h"
 
@@ -25,7 +25,7 @@ void loadGbaBorder(void) {
 	lodepng::decode(image, imageWidth, imageHeight, borderData, sizeof(borderData));
 	bool alternatePixel = false;
 
-	for(uint i = 0; i < image.size()/4; i++) {
+	for (uint i = 0; i < image.size()/4; i++) {
 		image[(i*4)+3] = 0;
 		if (alternatePixel) {
 			if (image[(i*4)] >= 0x4) {
@@ -45,11 +45,11 @@ void loadGbaBorder(void) {
 		if ((i % 256) == 255) alternatePixel = !alternatePixel;
 		alternatePixel = !alternatePixel;
 	}
-    DC_FlushRange(bmpImageBuffer,SCREEN_WIDTH*SCREEN_HEIGHT*2);
-    dmaCopy(bmpImageBuffer,(void*)BG_BMP_RAM(0),SCREEN_WIDTH*SCREEN_HEIGHT*2);
+	DC_FlushRange(bmpImageBuffer,SCREEN_WIDTH*SCREEN_HEIGHT*2);
+	dmaCopy(bmpImageBuffer,(void*)BG_BMP_RAM(0),SCREEN_WIDTH*SCREEN_HEIGHT*2);
 
 	alternatePixel = false;
-	for(uint i = 0; i < image.size()/4; i++) {
+	for (uint i = 0; i < image.size()/4; i++) {
 		if (alternatePixel) {
 			if (image[(i*4)+3] & BIT(0)) {
 				image[(i*4)] += 0x4;
@@ -75,8 +75,8 @@ void loadGbaBorder(void) {
 		if ((i % 256) == 255) alternatePixel = !alternatePixel;
 		alternatePixel = !alternatePixel;
 	}
-    DC_FlushRange(bmpImageBuffer,SCREEN_WIDTH*SCREEN_HEIGHT*2);
-    dmaCopy(bmpImageBuffer,(void*)BG_BMP_RAM(8),SCREEN_WIDTH*SCREEN_HEIGHT*2);
+	DC_FlushRange(bmpImageBuffer,SCREEN_WIDTH*SCREEN_HEIGHT*2);
+	dmaCopy(bmpImageBuffer,(void*)BG_BMP_RAM(8),SCREEN_WIDTH*SCREEN_HEIGHT*2);
 }
 
 void gbaSwitch(void) {

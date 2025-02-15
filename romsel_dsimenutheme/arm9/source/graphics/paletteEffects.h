@@ -187,8 +187,11 @@ const unsigned short phat_arrowButtonPalettes[16*16]
 
 
 
+int getFavoriteColor(void);
 void effectDSiArrowButtonPalettes(u16* palette, u8 paletteLength);
 void effectDSiStartBorderPalettes(u16* palette, u8 paletteLength);
 void effectDSiStartTextPalettes(u16* palette, u8 paletteLength);
-void effectGrayscalePalette(u16* palette, u8 paletteLength);
+void effectGrayscalePalette(u16* palette, u16 paletteLength);
+void effectPhatPalette(u16* palette, u16 paletteLength);
+void effectColorModePalette(u16* palette, u16 paletteLength);
 #endif

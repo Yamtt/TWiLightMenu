@@ -15,10 +15,11 @@ include $(DEVKITARM)/ds_rules
 # INCLUDES is a list of directories containing extra header files
 # DATA is a list of directories containing binary files embedded using bin2o
 #---------------------------------------------------------------------------------
+UNIVERSAL	:=	../../universal
 TARGET		:=	booter
 BUILD		:=	build
-SOURCES		:=	source
-INCLUDES    :=  include
+SOURCES		:=	source $(UNIVERSAL)/source/tonccpy $(UNIVERSAL)/sdmmc/arm9/source
+INCLUDES    :=  include $(UNIVERSAL)/include
 DATA        :=  ../data
 
 #---------------------------------------------------------------------------------
@@ -26,16 +27,17 @@ DATA        :=  ../data
 #---------------------------------------------------------------------------------
 ARCH	:=	-mthumb -mthumb-interwork
 
-CFLAGS	:=	-g -Wall -O2\
+CFLAGS	:=	-g -Wall -O2 \
  		-march=armv5te -mtune=arm946e-s -fomit-frame-pointer\
 		-ffast-math \
+		-flto \
 		$(ARCH)
 
-CFLAGS	+=	$(INCLUDE) -DARM9 -DNO_SDMMC
+CFLAGS	+=	$(INCLUDE) -DARM9 -DNO_SDMMC -DSTANDALONE -D_NO_MAIN_ALL
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions
 
-ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=../../../universal/arm9/ds_arm9_twlm.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+ASFLAGS	:=	-g $(ARCH) $(INCLUDE) -flto
+LDFLAGS	=	-specs=../$(UNIVERSAL)/arm9/ds_arm9_twlm.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
 #---------------------------------------------------------------------------------
 # any extra libraries we wish to link with the project (order is important)
@@ -48,7 +50,7 @@ LIBS	:= 	-lfat -lnds9
 # include and lib
 #---------------------------------------------------------------------------------
 LIBDIRS	:=	$(LIBNDS)
- 
+
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional
 # rules for different file extensions
@@ -70,7 +72,7 @@ CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
- 
+
 #---------------------------------------------------------------------------------
 # use CXX for linking C++ projects, CC for standard C
 #---------------------------------------------------------------------------------
@@ -87,20 +89,20 @@ endif
 
 export OFILES	:=	$(addsuffix .o,$(BINFILES)) \
 					$(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
- 
+
 export INCLUDE	:=	$(foreach dir,$(INCLUDES),-iquote $(CURDIR)/$(dir)) \
 					$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
 					-I$(CURDIR)/$(BUILD)
- 
+
 export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
 
 export OUTPUT	:=	$(CURDIR)/$(TARGET)
- 
+
 .PHONY: $(BUILD) clean
 
 all : $(BUILD)
-	
+
 #---------------------------------------------------------------------------------
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
@@ -112,7 +114,7 @@ clean:
 
 #---------------------------------------------------------------------------------
 else
- 
+
 DEPENDS	:=	$(OFILES:.o=.d)
 
 #---------------------------------------------------------------------------------

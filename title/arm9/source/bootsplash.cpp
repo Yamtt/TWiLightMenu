@@ -2,13 +2,13 @@
 #include <nds.h>
 #include <maxmod9.h>
 
-#include "common/dsimenusettings.h"
+#include "common/twlmenusettings.h"
 #include "common/flashcard.h"
 #include "common/systemdetails.h"
 #include "common/tonccpy.h"
 #include "graphics/gif.hpp"
 #include "graphics/graphics.h"
-#include "graphics/lodepng.h"
+#include "common/lodepng.h"
 
 #include "sound.h"
 
@@ -24,12 +24,9 @@ extern int screenBrightness;
 bool cartInserted;
 
 void bootSplashDSi(void) {
-	u16 whiteCol = 0xFFFF;
-	whiteCol = ((whiteCol>>10)&0x1f) | ((whiteCol)&((31-3*ms().blfLevel)<<5)) | (whiteCol&(31-6*ms().blfLevel))<<10 | BIT(15);
-	for (int i = 0; i < 256*256; i++) {
-		BG_GFX[i] = whiteCol;
-		BG_GFX_SUB[i] = whiteCol;
-	}
+	// u16 whiteCol = ((whiteCol>>10)&0x1f) | ((whiteCol)&((31-3*ms().blfLevel)<<5)) | (whiteCol&(31-6*ms().blfLevel))<<10 | BIT(15);
+	// toncset16(BG_GFX, 0xFFFF, 256*256);
+	// toncset16(BG_GFX_SUB, 0xFFFF, 256*256);
 
 	cartInserted = (REG_SCFG_MC != 0x11);
 
@@ -44,34 +41,40 @@ void bootSplashDSi(void) {
 	const struct tm *Time = localtime(&Raw);
 
 	strftime(currentDate, sizeof(currentDate), "%m/%d", Time);
-	bool virtualPain = (strcmp(currentDate, "04/01") == 0);
+	const bool virtualPain = (strcmp(currentDate, "04/01") == 0 || (ms().getGameRegion() == 0 ? (strcmp(currentDate, "07/21") == 0) : (strcmp(currentDate, "08/14") == 0))); // If April Fools, or the release date of the Virtual Boy
+	const bool super = (*(u16*)(0x020000C0) == 0x334D || *(u16*)(0x020000C0) == 0x3647 || *(u16*)(0x020000C0) == 0x4353); // Slot-2 flashcard
+	const bool regularDS = (sys().isRegularDS() && !ms().oppositeSplash) || (!sys().isRegularDS() && ms().oppositeSplash);
 
-	bool custom = ms().dsiSplash == 3;
+	const bool custom = ms().dsiSplash == 3;
 
 	char path[256];
 	if (virtualPain) {
 		sprintf(path, "nitro:/video/splash/virtualPain%s.gif", /*ms().wideScreen && !ms().macroMode ? "_wide" :*/ "");
 	} else if (ms().dsiSplash == 3 && access("/_nds/TWiLightMenu/extras/splashtop.gif", F_OK) == 0) {
-		sprintf(path, "%s:/_nds/TWiLightMenu/extras/splashtop.gif", sdFound() ? "sd" : "fat");
+		sprintf(path, "%s:/_nds/TWiLightMenu/extras/splashtop.gif", sys().isRunFromSD() ? "sd" : "fat");
+	} else if (ms().macroMode) {
+		sprintf(path, "nitro:/video/splash/gameBoy.gif");
+	} else if (super) {
+		sprintf(path, "nitro:/video/splash/superDS.gif");
 	} else {
-		sprintf(path, "nitro:/video/splash/%s.gif", language == TWLSettings::ELangChineseS ? "iquedsi" : (sys().isRegularDS() ? "ds" : "dsi"));
+		sprintf(path, "nitro:/video/splash/%s.gif", language == TWLSettings::ELangChineseS ? "iquedsi" : (regularDS ? "ds" : "dsi"));
 	}
 	Gif splash(path, true, true);
 
 	path[0] = '\0';
 	if (virtualPain) { // Load Virtual Pain image
 		strcpy(path, "nitro:/video/hsmsg/virtualPain.gif");
-	} else if (ms().dsiSplash == 1) { // Load Touch the Touch Screen to continue image
+	} else if (ms().dsiSplash == 1) { // Load "Touch the Touch Screen to continue" image
 		sprintf(path, "nitro:/video/tttstc/%i.gif", language);
 	} else if (ms().dsiSplash == 2) { // Load H&S image
 		sprintf(path, "nitro:/video/hsmsg/%i.gif", language);
 	} else if (ms().dsiSplash == 3 && access("/_nds/TWiLightMenu/extras/splashbottom.gif", F_OK) == 0) { // Load custom bottom image
-		sprintf(path, "%s:/_nds/TWiLightMenu/extras/splashbottom.gif", sdFound() ? "sd" : "fat");
+		sprintf(path, "%s:/_nds/TWiLightMenu/extras/splashbottom.gif", sys().isRunFromSD() ? "sd" : "fat");
 	}
 	Gif healthSafety(path, false, true);
 
 	// For the default splashes, draw first frame, then wait until the top is done
-	if(!custom) {
+	if (!custom) {
 		healthSafety.displayFrame();
 		healthSafety.pause();
 	}
@@ -80,16 +83,20 @@ void bootSplashDSi(void) {
 
 	if (cartInserted && !custom) {
 		u16 *gfx[2];
-		for(int i = 0; i < 2; i++) {
+		int yPos = virtualPain ? 130 : 142;
+		if (ms().macroMode && !virtualPain) {
+			yPos = 128;
+		}
+		for (int i = 0; i < 2; i++) {
 			gfx[i] = oamAllocateGfx(&oamMain, SpriteSize_64x32, SpriteColorFormat_Bmp);
-			oamSet(&oamMain, i, 67 + (i * 64), virtualPain ? 130 : 142, 0, 15, SpriteSize_64x32, SpriteColorFormat_Bmp, gfx[i], 0, false, false, false, false, false);
+			oamSet(&oamMain, i, 67 + (i * 64), yPos, 0, 15, SpriteSize_64x32, SpriteColorFormat_Bmp, gfx[i], 0, false, false, false, false, false);
 		}
 
 		std::vector<unsigned char> image;
 		unsigned int width, height;
 		lodepng::decode(image, width, height, virtualPain ? "nitro:/graphics/nintendoPain.png" : "nitro:/graphics/nintendo.png");
 
-		for(unsigned int i = 0, y = 0, x = 0;i < image.size() / 4; i++, x++) {
+		for (unsigned int i = 0, y = 0, x = 0;i < image.size() / 4; i++, x++) {
 			if (!virtualPain && image[(i * 4) + 3] > 0) {
 				switch (ms().nintendoLogoColor) {
 					default: // Gray (Original color)
@@ -112,11 +119,11 @@ void bootSplashDSi(void) {
 				}
 			}
 			u16 color = image[i * 4] >> 3 | (image[(i * 4) + 1] >> 3) << 5 | (image[(i * 4) + 2] >> 3) << 10 | (image[(i * 4) + 3] > 0) << 15;
-			if (ms().colorMode == 1) {
-				color = convertVramColorToGrayscale(color);
+			if (colorTable) {
+				color = (color & 0x8000) | (colorTable[color] & 0x7FFF);
 			}
 
-			if(x >= width) {
+			if (x >= width) {
 				x = 0;
 				y++;
 			}
@@ -127,7 +134,10 @@ void bootSplashDSi(void) {
 		oamUpdate(&oamMain);
 	}
 
-	if(!custom && !virtualPain) {
+	if (!custom && !virtualPain) {
+		BG_PALETTE[0] = 0xFFFF;
+		BG_PALETTE_SUB[0] = 0xFFFF;
+
 		controlBottomBright = false;
 		fadeType = false;
 		screenBrightness = 0;
@@ -141,13 +151,13 @@ void bootSplashDSi(void) {
 	fadeType = true;
 
 	// If both will loop forever, show for 3s or until button press
-	if((!custom && ms().macroMode) || (splash.loopForever() && healthSafety.loopForever())) {
+	if ((!custom && ms().macroMode) || (splash.loopForever() && healthSafety.loopForever())) {
 		for (int i = 0; i < 60 * 3 && !keysDown(); i++) {
 			swiWaitForVBlank();
 			//loadROMselectAsynch();
 			scanKeys();
 
-			if (!custom && splash.currentFrame() == 24)
+			if (!custom && splash.currentFrame() == 14)
 				snd().playDSiBoot();
 		}
 	} else {
@@ -157,24 +167,25 @@ void bootSplashDSi(void) {
 			//loadROMselectAsynch();
 			scanKeys();
 			pressed = keysDown();
+			pressed &= ~KEY_LID;
 
 			if (splash.waitingForInput()) {
-				if(!custom && healthSafety.paused())
+				if (!custom && healthSafety.paused())
 					healthSafety.unpause();
-				if(pressed || ms().dsiSplashAutoSkip) {
+				if (pressed || ms().dsiSplashAutoSkip) {
 					splash.resume();
 					snd().playSelect();
 				}
 			}
 
-			if(healthSafety.waitingForInput()) {
-				if(pressed || ms().dsiSplashAutoSkip) {
+			if (healthSafety.waitingForInput()) {
+				if (pressed || ms().dsiSplashAutoSkip) {
 					healthSafety.resume();
 					snd().playSelect();
 				}
 			}
 
-			if (!custom && splash.currentFrame() == 24)
+			if (!custom && splash.currentFrame() == (super ? 1 : 24))
 				snd().playDSiBoot();
 		}
 	}

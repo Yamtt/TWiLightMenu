@@ -1,9 +1,9 @@
-#include "tonccpy.h"
+#include "common/tonccpy.h"
 #include "find.h"
 #include "Save.h"
 #include "EepromSave.h"
 
-extern u32 romSize;
+extern u32 romFileSize;
 
 //todo: Moero!! Jaleco Collection (Japan) reports EEPROM_V124, but the signatures below don't work!
 
@@ -77,12 +77,12 @@ const u8 patch_eeprom_2[]=
 
 bool eeprom_patchV111(const save_type_t* type)
 {
-	u8* readFunc = memsearch8((u8*)0x08000000, romSize, sReadEepromDwordV111Sig, 0x10, true);
+	u8* readFunc = memsearch8((u8*)0x08000000, romFileSize, sReadEepromDwordV111Sig, 0x10, true);
 	if (!readFunc)
 		return false;
 	tonccpy(readFunc, &patch_eeprom_1, sizeof(patch_eeprom_1));
 
-	u8* progFunc = memsearch8((u8*)0x08000000, romSize, sProgramEepromDwordV111Sig, 0x10, true);
+	u8* progFunc = memsearch8((u8*)0x08000000, romFileSize, sProgramEepromDwordV111Sig, 0x10, true);
 	if (!progFunc)
 		return false;
 	tonccpy(progFunc, &patch_eeprom_2, sizeof(patch_eeprom_2));
@@ -92,7 +92,7 @@ bool eeprom_patchV111(const save_type_t* type)
 bool eeprom_patchV120(const save_type_t* type)
 {
 	u32* romPos = (u32*)0x08000000;
-	u32 curRomSize = romSize;
+	u32 curRomSize = romFileSize;
 	u32 startSig[4] = {0};
 	startSig[0] = *(u32*)0x08000000;
 	startSig[1] = *(u32*)0x08000004;
@@ -102,7 +102,7 @@ bool eeprom_patchV120(const save_type_t* type)
 	for (int i = 0; i < 3; i++) {
 
 	if (i != 0) {
-		while (romPos < romPos+romSize) {
+		while (romPos < romPos+romFileSize) {
 			// Look for another ROM in 2-3 in 1 game packs
 			romPos += 0x100000;
 			curRomSize -= 0x100000;
@@ -110,13 +110,12 @@ bool eeprom_patchV120(const save_type_t* type)
 			if (romPos[0] == startSig[0]
 			&& romPos[1] == startSig[1]
 			&& romPos[2] == startSig[2]
-			&& romPos[3] == startSig[3])
-			{
+			&& romPos[3] == startSig[3]) {
 				break;
 			}
 		}
 
-		if (romPos >= romPos+romSize) break;
+		if (romPos >= romPos+romFileSize) break;
 	}
 
 	u8* readFunc = memsearch8((u8*)romPos, curRomSize, sReadEepromDwordV120Sig, 0x10, true);
@@ -137,7 +136,7 @@ bool eeprom_patchV120(const save_type_t* type)
 bool eeprom_patchV124(const save_type_t* type)
 {
 	u32* romPos = (u32*)0x08000000;
-	u32 curRomSize = romSize;
+	u32 curRomSize = romFileSize;
 	u32 startSig[4] = {0};
 	startSig[0] = *(u32*)0x08000000;
 	startSig[1] = *(u32*)0x08000004;
@@ -147,7 +146,7 @@ bool eeprom_patchV124(const save_type_t* type)
 	for (int i = 0; i < 2; i++) {
 
 	if (i != 0) {
-		while (romPos < romPos+romSize) {
+		while (romPos < romPos+romFileSize) {
 			// Look for another ROM in 2 in 1 game packs
 			romPos += 0x100000;
 			curRomSize -= 0x100000;
@@ -155,13 +154,12 @@ bool eeprom_patchV124(const save_type_t* type)
 			if (romPos[0] == startSig[0]
 			&& romPos[1] == startSig[1]
 			&& romPos[2] == startSig[2]
-			&& romPos[3] == startSig[3])
-			{
+			&& romPos[3] == startSig[3]) {
 				break;
 			}
 		}
 
-		if (romPos >= romPos+romSize) break;
+		if (romPos >= romPos+romFileSize) break;
 	}
 
 	u8* readFunc = memsearch8((u8*)romPos, curRomSize, sReadEepromDwordV120Sig, 0x10, true);
@@ -181,12 +179,12 @@ bool eeprom_patchV124(const save_type_t* type)
 
 bool eeprom_patchV126(const save_type_t* type)
 {
-	u8* readFunc = memsearch8((u8*)0x08000000, romSize, sReadEepromDwordV120Sig, 0x10, true);
+	u8* readFunc = memsearch8((u8*)0x08000000, romFileSize, sReadEepromDwordV120Sig, 0x10, true);
 	if (!readFunc)
 		return false;
 	tonccpy(readFunc, &patch_eeprom_1, sizeof(patch_eeprom_1));
 
-	u8* progFunc = memsearch8((u8*)0x08000000, romSize, sProgramEepromDwordV126Sig, 0x10, true);
+	u8* progFunc = memsearch8((u8*)0x08000000, romFileSize, sProgramEepromDwordV126Sig, 0x10, true);
 	if (!progFunc)
 		return false;
 	tonccpy(progFunc, &patch_eeprom_2, sizeof(patch_eeprom_2));

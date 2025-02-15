@@ -15,10 +15,11 @@ include $(DEVKITARM)/ds_rules
 # INCLUDES is a list of directories containing extra header files
 # DATA is a list of directories containing binary files embedded using bin2o
 #---------------------------------------------------------------------------------
+UNIVERSAL	:=	../../../../universal
 TARGET		:=	booter
 BUILD		:=	build
-SOURCES		:=	../../../arm9/source
-INCLUDES	:=	../../../arm9/include
+SOURCES		:=	../../../arm9/source $(UNIVERSAL)/source/tonccpy $(UNIVERSAL)/sdmmc/arm9/source
+INCLUDES	:=	../../../arm9/include $(UNIVERSAL)/include
 DATA		:=	../../../data
 
 CRT0		?=	0x02000000
@@ -28,15 +29,16 @@ CRT0		?=	0x02000000
 #---------------------------------------------------------------------------------
 ARCH	:=	-mthumb -mthumb-interwork
 
-CFLAGS	:=	-g -Wall -O2\
+CFLAGS	:=	-g -Wall -O2 \
  		-march=armv5te -mtune=arm946e-s -fomit-frame-pointer\
 		-ffast-math \
+		-flto \
 		$(ARCH)
 
 CFLAGS	+=	$(INCLUDE) -DARM9
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions
 
-ASFLAGS	:=	-g $(ARCH)
+ASFLAGS	:=	-g $(ARCH) $(INCLUDE) -flto
 LDFLAGS	=	-specs=ds_arm9.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
 #---------------------------------------------------------------------------------

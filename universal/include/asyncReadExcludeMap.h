@@ -2,6 +2,7 @@
 #define ASYNCHREADEXCLUDEMAP_H
 
 static const char asyncReadExcludeList[][4] = {
+	"CD6", // 7th Dragon
 	"ADM", // Animal Crossing: Wild World
 	"VAA", // Art Academy
 	"CBB", // Big Bang Mini
@@ -14,6 +15,7 @@ static const char asyncReadExcludeList[][4] = {
 	"DMD", // DSi XL Demo Video Volume 1
 	"DME", // DSi XL Demo Video Volume 2
 	"BJ3", // Etrian Odyssey 3
+	"USK", // Face Training
 	"BGT", // Ghost Trick: Phantom Detective
 	"YEE", // Inazuma Eleven
 	"BEE", // Inazuma Eleven 2: Firestorm

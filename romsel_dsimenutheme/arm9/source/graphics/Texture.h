@@ -21,16 +21,26 @@ struct GrfHeader
 
 enum TextureType {
 	Unknown = 0,
-	PalettedGrf = 1,
-	BMP = 2,
-	CompressedGrf = 3,
-	PNG = 4,
+
+	// Bitfields
+	Bitmap = 1,
+	Paletted = 2,
+	Compressed = 4,
+
+	// Types
+	CompressedGrf = 8 | Compressed,
+	PalettedGrf = 8 | Paletted,
+	Bmp = 16 | Bitmap,
+	PalettedBmp = 16 | Paletted,
+	Png = 32 | Bitmap,
 };
 
 class Texture
 {
 	typedef void (*PaletteEffect)(u16* palette, u8 paletteLength);
 	typedef void (*BitmapEffect)(u16* texture, u32 texLength);
+
+	constexpr const static char *extensions[] = {".grf", ".png", ".bmp"};
 
 	private:
 		unique_ptr<u16[]> _palette;
@@ -43,7 +53,8 @@ class Texture
 		TextureType _type;
 	
 	public:
-		Texture(const std::string& filePath, const std::string& fallback) noexcept;
+		Texture(const std::string& filePath, const std::string& fallback1, const std::string& fallback2) noexcept;
+		Texture(const std::string& filePath, const std::string& fallback) noexcept : Texture(filePath, fallback, "") {};
 		Texture(const Texture &) = delete;
 		Texture(Texture&&) = default;
 
@@ -51,21 +62,24 @@ class Texture
 
 		void applyPaletteEffect(PaletteEffect effect);
 		void applyBitmapEffect(BitmapEffect effect);
+		void applyUserPaletteFile(const std::string &filePath, PaletteEffect fallbackEffect);
 
 		static u16 bmpToDS(u16 val);
 
-		const u16 *palette() const { return _type == TextureType::PalettedGrf ? (u16*)_palette.get() : NULL; }
+		const u16 *palette() const { return _type & TextureType::Paletted ? (u16*)_palette.get() : NULL; }
 		const u16 *texture() const { return _texture.get(); }
 		const u8 *bytes() const { return (u8*)_texture.get(); }
 
 		u32 texHeight() const { return _texHeight; };
 		u32 texWidth() const { return _texWidth; };
 		u32 pixelCount() const { return _texHeight * _texWidth; };
-		u8 paletteLength() const { return _type == TextureType::PalettedGrf ? _paletteLength : 0;};
+		u8 paletteLength() const { return _type & TextureType::Paletted ? _paletteLength : 0;};
 		u32 texLength() const { return _texLength; };
 		u32 texCmpLength() const { return _texCmpLength; };
 
 		TextureType type() const { return _type; }
+
+		void copy(u16 *dst, bool vram) const;
 
 	private:
 		TextureType findType(FILE* file);

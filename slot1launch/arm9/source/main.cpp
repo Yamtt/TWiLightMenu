@@ -27,21 +27,25 @@
 
 #include "twlClockExcludeMap.h"
 #include "defaultSettings.h"
-#include "tonccpy.h"
-#include "inifile.h"
+#include "common/inifile.h"
+#include "common/tonccpy.h"
 #include "nds_card.h"
 #include "launch_engine.h"
 #include "crc.h"
 
-sNDSHeader ndsHeader;
+struct {
+sNDSHeader header;
+char padding[0x200 - sizeof(sNDSHeader)];
+} ndsHeader;
 
 bool consoleInited = false;
 bool scfgUnlock = false;
-int TWLMODE = false;
+int TWLMODE = 0;
 bool TWLCLK = false;	// false == NTR, true == TWL
-int TWLVRAM = false;
+int TWLVRAM = 0;
 bool TWLTOUCH = false;
 bool soundFreq = false;
+bool sleepMode = true;
 bool runCardEngine = false;
 bool EnableSD = false;
 bool ignoreBlacklists = false;
@@ -51,7 +55,7 @@ int language = -1;
  * Disable TWL clock speed for a specific game.
  */
 bool setClockSpeed(int setting, char gameTid[], bool ignoreBlacklists) {
-	if(!ignoreBlacklists) {
+	if (!ignoreBlacklists) {
 		// TODO: If the list gets large enough, switch to bsearch().
 		for (unsigned int i = 0; i < sizeof(twlClockExcludeList)/sizeof(twlClockExcludeList[0]); i++) {
 			if (memcmp(gameTid, twlClockExcludeList[i], 3) == 0) {
@@ -68,11 +72,11 @@ u8 cheatData[0x8000] = {0};
 
 off_t getFileSize(const char *fileName)
 {
-    FILE* fp = fopen(fileName, "rb");
-    off_t fsize = 0;
-    if (fp) {
-        fseek(fp, 0, SEEK_END);
-        fsize = ftell(fp);			// Get source file's size
+	FILE* fp = fopen(fileName, "rb");
+	off_t fsize = 0;
+	if (fp) {
+		fseek(fp, 0, SEEK_END);
+		fsize = ftell(fp);			// Get source file's size
 		fseek(fp, 0, SEEK_SET);
 	}
 	fclose(fp);
@@ -84,17 +88,20 @@ off_t getFileSize(const char *fileName)
 bool consoleOn = false;
 
 int main() {
+	fifoSendValue32(FIFO_PM, PM_REQ_SLEEP_DISABLE);
+
 	if (isDSiMode()) {
 		// If slot is powered off, tell Arm7 slot power on is required.
-		if(REG_SCFG_MC == 0x11) { fifoSendValue32(FIFO_USER_02, 1); }
-		if(REG_SCFG_MC == 0x10) { fifoSendValue32(FIFO_USER_02, 1); }
+		if (REG_SCFG_MC == 0x11) { fifoSendValue32(FIFO_USER_02, 1); }
+		if (REG_SCFG_MC == 0x10) { fifoSendValue32(FIFO_USER_02, 1); }
 
 		if (fatInitDefault()) {
 			CIniFile settingsini("/_nds/TWiLightMenu/settings.ini");
 
 			ignoreBlacklists = settingsini.GetInt("SRLOADER","IGNORE_BLACKLISTS",false);
-			TWLTOUCH = settingsini.GetInt("SRLOADER","SLOT1_TOUCH_MODE",0);
+			// TWLTOUCH = settingsini.GetInt("SRLOADER","SLOT1_TOUCH_MODE",0);
 			soundFreq = settingsini.GetInt("NDS-BOOTSTRAP","SOUND_FREQ",0);
+			sleepMode = settingsini.GetInt("SRLOADER","SLEEP_MODE",1);
 			runCardEngine = settingsini.GetInt("SRLOADER","SLOT1_CARDENGINE",1);
 			EnableSD = settingsini.GetInt("SRLOADER","SLOT1_ENABLESD",0);
 
@@ -111,7 +118,7 @@ int main() {
 			cardReadHeader((uint8*)&ndsHeader);
 
 			char gameTid[5];
-			tonccpy(gameTid, ndsHeader.gameCode, 4);
+			tonccpy(gameTid, ndsHeader.header.gameCode, 4);
 			char pergamefilepath[256];
 			sprintf(pergamefilepath, "/_nds/TWiLightMenu/gamesettings/slot1/%s.ini", gameTid);
 
@@ -127,13 +134,13 @@ int main() {
 				TWLVRAM = DEFAULT_BOOST_VRAM;
 			}
 
-			//if(settingsini.GetInt("SRLOADER","DEBUG",0) == 1) {
+			//if (settingsini.GetInt("SRLOADER","DEBUG",0) == 1) {
 			//	consoleOn = true;
 			//	consoleDemoInit();
 			//}
 
-			if(!TWLCLK && !TWLMODE) {
-				//if(settingsini.GetInt("TWL-MODE","DEBUG",0) == 1) {
+			if (!TWLCLK && (ndsHeader.header.unitCode == 0 || !TWLMODE)) {
+				//if (settingsini.GetInt("TWL-MODE","DEBUG",0) == 1) {
 				//	printf("TWL_CLOCK ON\n");		
 				//}
 				fifoSendValue32(FIFO_USER_04, 1);
@@ -143,15 +150,15 @@ int main() {
 				swiWaitForVBlank();
 			}
 
-			//if(EnableSD) {
-				//if(settingsini.GetInt("SRLOADER","DEBUG",0) == 1) {
+			//if (EnableSD) {
+				//if (settingsini.GetInt("SRLOADER","DEBUG",0) == 1) {
 				//	printf("SD access ON\n");		
 				//}
 			//}
 
 			scfgUnlock = settingsini.GetInt("SRLOADER","SLOT1_SCFG_UNLOCK",0);
 
-			if(settingsini.GetInt("SRLOADER","RESET_SLOT1",1) == 1) {
+			if (settingsini.GetInt("SRLOADER","RESET_SLOT1",1) == 1) {
 				fifoSendValue32(FIFO_USER_02, 1);
 				fifoSendValue32(FIFO_USER_07, 1);
 			}
@@ -180,7 +187,7 @@ int main() {
 			cardReadHeader((uint8*)&ndsHeader);
 		}
 
-		if (ndsHeader.unitCode > 0 && TWLMODE) {
+		if (ndsHeader.header.unitCode > 0 && TWLMODE) {
 			runCardEngine = false;
 		}
 	} else {
@@ -223,7 +230,7 @@ int main() {
 			for (int i = 0; i < 30; i++) { swiWaitForVBlank(); }
 		} else if (io_dldi_data->ioInterface.features & FEATURE_SLOT_GBA) {
 			// Check header CRC
-			if (ndsHeader.headerCRC16 != swiCRC16(0xFFFF, (void*)&ndsHeader, 0x15E)) {
+			if (ndsHeader.header.headerCRC16 != swiCRC16(0xFFFF, (void*)&ndsHeader, 0x15E)) {
 				consoleDemoInit();
 				consoleInited = true;
 				iprintf ("Please reboot the console with\n");
@@ -233,8 +240,8 @@ int main() {
 		}
 	}
 
-	while(1) {
-		if(REG_SCFG_MC == 0x11) {
+	while (1) {
+		if (REG_SCFG_MC == 0x11) {
 		break; } else {
 			if (runCardEngine) {
 				cheatData[3] = 0xCF;
@@ -247,7 +254,8 @@ int main() {
 				}
 				tonccpy((void*)0x023F0000, cheatData, 0x8000);
 			}
-			runLaunchEngine ((memcmp(ndsHeader.gameCode, "UBRP", 4) == 0 || memcmp(ndsHeader.gameCode, "AMFE", 4) == 0 || memcmp(ndsHeader.gameCode, "ALXX", 4) == 0), (memcmp(ndsHeader.gameCode, "UBRP", 4) == 0));
+			const auto& gameCode = ndsHeader.header.gameCode;
+			runLaunchEngine ((memcmp(gameCode, "UBRP", 4) == 0 || memcmp(gameCode, "AMFE", 4) == 0 || memcmp(gameCode, "ALXX", 4) == 0 || memcmp(ndsHeader.header.gameTitle, "D!S!XTREME", 10) == 0), (memcmp(gameCode, "UBRP", 4) == 0));
 		}
 	}
 	return 0;

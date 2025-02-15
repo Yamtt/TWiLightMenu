@@ -12,10 +12,14 @@ endif
 # SOURCES is a list of directories containing source code
 # INCLUDES is a list of directories containing extra header files
 #---------------------------------------------------------------------------------
+UNIVERSAL	:=	../../universal
 TARGET		:=	load
 BUILD		:=	build
-SOURCES		:=	source
-INCLUDES	:=	build source
+DSIMODE_FULL_SOURCES := source/twltool source/polarssl source/gm9i
+SOURCES		:=	source $(UNIVERSAL)/source/tonccpy
+#SOURCES		:=	source $(UNIVERSAL)/source/tonccpy $(DSIMODE_FULL_SOURCES)
+INCLUDES	:=	build source $(UNIVERSAL)/include
+#INCLUDES		:=	build source $(UNIVERSAL)/include $(DSIMODE_FULL_SOURCES)
 DATA		:=	../data
 SPECS		:=  specs
  

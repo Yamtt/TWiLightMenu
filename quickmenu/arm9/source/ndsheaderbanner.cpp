@@ -29,7 +29,8 @@ bool checkDsiBinaries(FILE* ndsFile) {
 		return true;
 	}
 
-	if (ndsHeader.arm9iromOffset == 0 || ndsHeader.arm7iromOffset == 0) {
+	if (ndsHeader.arm9iromOffset < 0x8000 || ndsHeader.arm9iromOffset >= 0x20000000
+	 || ndsHeader.arm7iromOffset < 0x8000 || ndsHeader.arm7iromOffset >= 0x20000000) {
 		return false;
 	}
 
@@ -103,18 +104,24 @@ u32 getSDKVersion(FILE *ndsFile)
 static u16 bnriconframeseq[2][64] = {0x0000};
 
 // bnriconframenum[]
-int bnriconPalLine[2] = {0};
-int bnriconframenumY[2] = {0};
-int bannerFlip[2] = {GL_FLIP_NONE};
+int bnriconPalLoaded[2]{};
+int bnriconPalLine[2]{};
+int bnriconPalLinePrev[2]{};
+int bnriconframenumY[2]{};
+int bnriconframenumYPrev[2]{};
+int bannerFlip[2]{GL_FLIP_NONE, GL_FLIP_NONE};
+int bannerFlipPrev[2]{GL_FLIP_NONE, GL_FLIP_NONE};
 
 // bnriconisDSi[]
-bool isDirectory[2] = {false};
-int bnrRomType[2] = {0};
-bool bnriconisDSi[2] = {false};
-int bnrWirelessIcon[2] = {0}; 			// 0 = None, 1 = Local, 2 = WiFi
-bool isDSiWare[2] = {false};
-bool isHomebrew[2] = {false};
-bool isModernHomebrew[2] = {false};		// false == No DSi-Extended header, true == Has DSi-Extended header
+bool isDirectory[2]{false, false};
+eROMType bnrRomType[2]{};
+bool bnriconisDSi[2]{false, false};
+int bnrWirelessIcon[2]{}; 			// 0 = None, 1 = Local, 2 = WiFi
+bool isDSiWare[2]{false, false};
+bool isHomebrew[2]{false, false};
+bool isModernHomebrew[2]{false, false};		// false == No DSi-Extended header, true == Has DSi-Extended header
+int customIcon[2]{};				// 0 = None, 1 = png, 2 = banner.bin, -1 = error
+char customIconPath[256];
 
 /**
  * Get banner sequence from banner file.
@@ -122,8 +129,7 @@ bool isModernHomebrew[2] = {false};		// false == No DSi-Extended header, true ==
  */
 void grabBannerSequence(int num)
 {
-	for (int i = 0; i < 64; i++)
-	{
+	for (int i = 0; i < 64; i++) {
 		bnriconframeseq[num][i] = ndsBanner.dsi_seq[i];
 	}
 }
@@ -133,8 +139,7 @@ void grabBannerSequence(int num)
  */
 void clearBannerSequence(int num)
 {
-	for (int i = 0; i < 64; i++)
-	{
+	for (int i = 0; i < 64; i++) {
 		bnriconframeseq[num][i] = 0x0000;
 	}
 }
@@ -146,49 +151,58 @@ int currentbnriconframeseq[2] = {0};
  * Play banner sequence.
  * @param binFile Banner file.
  */
-void playBannerSequence(int num)
+bool playBannerSequence(int num)
 {
-	if (bnriconframeseq[num][currentbnriconframeseq[num] + 1] == 0x0100)
-	{
+	if (bnriconframeseq[num][currentbnriconframeseq[num] + 1] == 0x0100) {
 		// Do nothing if icon isn't animated
 		bnriconPalLine[num] = 0;
 		bnriconframenumY[num] = 0;
 		bannerFlip[num] = GL_FLIP_NONE;
-	}
-	else
-	{
+	} else {
 		u16 setframeseq = bnriconframeseq[num][currentbnriconframeseq[num]];
 		bnriconPalLine[num] = SEQ_PAL(setframeseq);
 		bnriconframenumY[num] =  SEQ_BMP(setframeseq);
 		bool flipH = SEQ_FLIPH(setframeseq);
 		bool flipV = SEQ_FLIPV(setframeseq);
 
-		if (flipH && flipV)
-		{
+		if (flipH && flipV) {
 			bannerFlip[num] = GL_FLIP_H | GL_FLIP_V;
-		}
-		else if (!flipH && !flipV)
-		{
+		} else if (!flipH && !flipV) {
 			bannerFlip[num] = GL_FLIP_NONE;
-		}
-		else if (flipH && !flipV)
-		{
+		} else if (flipH && !flipV) {
 			bannerFlip[num] = GL_FLIP_H;
-		}
-		else if (!flipH && flipV)
-		{
+		} else if (!flipH && flipV) {
 			bannerFlip[num] = GL_FLIP_V;
 		}
 
+		bool updateIcon = false;
+
+		if (bnriconPalLinePrev[num] != bnriconPalLine[num]) {
+			bnriconPalLinePrev[num] = bnriconPalLine[num];
+			updateIcon = true;
+		}
+
+		if (bnriconframenumYPrev[num] != bnriconframenumY[num]) {
+			bnriconframenumYPrev[num] = bnriconframenumY[num];
+			updateIcon = true;
+		}
+
+		if (bannerFlipPrev[num] != bannerFlip[num]) {
+			bannerFlipPrev[num] = bannerFlip[num];
+			updateIcon = true;
+		}
+
 		bannerDelayNum[num]++;
-		if (bannerDelayNum[num] >= (setframeseq & 0x00FF))
-		{
+		if (bannerDelayNum[num] >= (setframeseq & 0x00FF)) {
 			bannerDelayNum[num] = 0x0000;
 			currentbnriconframeseq[num]++;
-			if (bnriconframeseq[num][currentbnriconframeseq[num]] == 0x0000)
-			{
+			if (bnriconframeseq[num][currentbnriconframeseq[num]] == 0x0000) {
 				currentbnriconframeseq[num] = 0; // Reset sequence
 			}
 		}
+
+		return updateIcon;
 	}
+
+	return false;
 }
